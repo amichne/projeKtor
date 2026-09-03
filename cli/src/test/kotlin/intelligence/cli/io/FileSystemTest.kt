@@ -10,7 +10,7 @@ import kotlin.test.assertFalse
 class FileSystemTest {
     @Test
     fun `delete recursively clears read only files`() {
-        val root = Files.createTempDirectory("intelligence-read-only-delete-")
+        val root = Files.createTempDirectory("source-projection-read-only-delete-")
         val readOnlyFile = root.resolve("read-only.txt")
         readOnlyFile.writeText("content\n")
         val dosAttributes = Files.getFileAttributeView(readOnlyFile, DosFileAttributeView::class.java)

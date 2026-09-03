@@ -18,51 +18,40 @@ import kotlinx.serialization.json.jsonObject
 
 class ProjectionPipelineTest {
     @Test
-    fun `copilot provider alias resolves to github projection`() {
-        assertEquals(MarketplaceProvider.GitHub, MarketplaceProvider.parse("copilot"))
-    }
-
-    @Test
-    fun `materialize all serializes codex and github marketplace roots`() {
-        val output = Files.createTempDirectory("intelligence-marketplace-test-")
+    fun `materialize serializes each published harness projection`() {
+        val codexOutput = Files.createTempDirectory("source-projection-codex-test-")
+        val githubOutput = Files.createTempDirectory("source-projection-github-test-")
         val service = MarketplaceProjector(output = {})
 
         service.materialize(
-            repoRoot = repoRoot(),
-            outRoot = output,
-            provider = MarketplaceProvider.All,
+            repoRoot = fixtureRoot(),
+            outRoot = codexOutput,
+            provider = MarketplaceProvider.Codex,
+        )
+        service.materialize(
+            repoRoot = fixtureRoot(),
+            outRoot = githubOutput,
+            provider = MarketplaceProvider.GitHub,
         )
 
-        assertTrue(output.resolve(".agents").resolve("plugins").resolve("marketplace.json").exists())
+        assertTrue(codexOutput.resolve(".agents/plugins/marketplace.json").exists())
         val codexMarketplace =
-            JsonFiles.readObject(output.resolve(".agents").resolve("plugins").resolve("marketplace.json"))
-        val kotlinEngineeringEntry =
-            codexMarketplace.arrayValue("plugins").single {
-                it.jsonObject.stringValue("name") == "kotlin-engineering"
-            }.jsonObject
+            JsonFiles.readObject(codexOutput.resolve(".agents/plugins/marketplace.json"))
+        val codexEntry = codexMarketplace.arrayValue("plugins").single().jsonObject
         assertEquals(
-            "./.agents/plugins/kotlin-engineering",
-            kotlinEngineeringEntry.objectValue("source")!!.stringValue("path"),
+            "./.agents/plugins/fixture-plugin",
+            codexEntry.objectValue("source")!!.stringValue("path"),
         )
-        assertTrue(
-            output.resolve(".agents")
-                .resolve("plugins")
-                .resolve("kotlin-engineering")
-                .exists()
-        )
-        assertTrue(output.resolve(".github").resolve("plugin").resolve("marketplace.json").exists())
+        assertTrue(codexOutput.resolve(".agents/plugins/fixture-plugin").exists())
+
+        assertTrue(githubOutput.resolve(".github/plugin/marketplace.json").exists())
         val githubMarketplace =
-            JsonFiles.readObject(output.resolve(".github").resolve("plugin").resolve("marketplace.json"))
+            JsonFiles.readObject(githubOutput.resolve(".github/plugin/marketplace.json"))
         assertEquals(".github/plugin", githubMarketplace.objectValue("metadata")!!.stringValue("pluginRoot"))
-        val githubKotlinEngineeringEntry =
-            githubMarketplace.arrayValue("plugins").single {
-                it.jsonObject.stringValue("name") == "kotlin-engineering"
-            }.jsonObject
-        assertEquals("kotlin-engineering", githubKotlinEngineeringEntry.stringValue("source"))
-        val githubPluginRoot = output.resolve(".github/plugin/kotlin-engineering")
+        val githubEntry = githubMarketplace.arrayValue("plugins").single().jsonObject
+        assertEquals("fixture-plugin", githubEntry.stringValue("source"))
+        val githubPluginRoot = githubOutput.resolve(".github/plugin/fixture-plugin")
         val githubPlugin = JsonFiles.readObject(githubPluginRoot.resolve("plugin.json"))
-        assertEquals("./agents", githubPlugin.stringValue("agents"))
-        assertEquals("./skills", githubPlugin.stringValue("skills"))
         assertEquals("./hooks.json", githubPlugin.stringValue("hooks"))
         assertTrue(githubPluginRoot.resolve("hooks.json").exists())
 
@@ -70,10 +59,19 @@ class ProjectionPipelineTest {
             0,
             ProjectionValidator(output = {}).validate(
                 ProjectionValidationOptions(
-                    repo = repoRoot(),
-                    hydrated = output,
+                    repo = fixtureRoot(),
+                    hydrated = codexOutput,
                 )
-            )
+            ),
+        )
+        assertEquals(
+            0,
+            ProjectionValidator(output = {}).validate(
+                ProjectionValidationOptions(
+                    repo = fixtureRoot(),
+                    hydrated = githubOutput,
+                )
+            ),
         )
     }
 
@@ -235,7 +233,7 @@ class ProjectionPipelineTest {
                 it.parent.createDirectories()
                 it.writeText("#!/usr/bin/env bash\n", Charsets.UTF_8)
             }
-        val output = Files.createTempDirectory("intelligence-marketplace-github-hook-metadata-")
+        val output = Files.createTempDirectory("source-projection-github-hook-metadata-")
 
         MarketplaceProjector(output = {}).materialize(
             repoRoot = repository,
@@ -259,8 +257,7 @@ class ProjectionPipelineTest {
 
     @Test
     fun `source validation rejects non https plugin interface URLs`() {
-        val repository = Files.createTempDirectory("intelligence-marketplace-interface-validation-")
-        repository.resolve("schemas").createDirectories()
+        val repository = Files.createTempDirectory("source-projection-interface-validation-")
         writeJson(
             repository.resolve("source").resolve("adaptable.marketplace.json"),
             """
@@ -317,7 +314,7 @@ class ProjectionPipelineTest {
 
     @Test
     fun `hydrated codex validation rejects nested plugin source paths`() {
-        val repository = Files.createTempDirectory("intelligence-marketplace-stale-codex-path-")
+        val repository = Files.createTempDirectory("source-projection-stale-codex-path-")
         writeJson(
             repository.resolve(".agents").resolve("plugins").resolve("marketplace.json"),
             """
@@ -368,7 +365,7 @@ class ProjectionPipelineTest {
 
     @Test
     fun `hydrated github validation rejects nested plugin root`() {
-        val repository = Files.createTempDirectory("intelligence-marketplace-stale-github-path-")
+        val repository = Files.createTempDirectory("source-projection-stale-github-path-")
         writeJson(
             repository.resolve(".github").resolve("plugin").resolve("marketplace.json"),
             """
@@ -410,18 +407,18 @@ class ProjectionPipelineTest {
 
     @Test
     fun `hydrated github validation rejects a missing plugin manifest`() {
-        val output = Files.createTempDirectory("intelligence-marketplace-missing-github-plugin-manifest-")
+        val output = Files.createTempDirectory("source-projection-missing-github-plugin-manifest-")
         MarketplaceProjector(output = {}).materialize(
-            repoRoot = repoRoot(),
+            repoRoot = fixtureRoot(),
             outRoot = output,
             provider = MarketplaceProvider.GitHub,
         )
-        Files.delete(output.resolve(".github/plugin/kotlin-engineering/plugin.json"))
+        Files.delete(output.resolve(".github/plugin/fixture-plugin/plugin.json"))
         val validation = mutableListOf<String>()
 
         val result = ProjectionValidator(output = validation::add).validate(
             ProjectionValidationOptions(
-                repo = repoRoot(),
+                repo = fixtureRoot(),
                 hydrated = output,
             ),
         )
@@ -432,14 +429,14 @@ class ProjectionPipelineTest {
 
     @Test
     fun `hydrated github validation rejects a malformed hook event`() {
-        val output = Files.createTempDirectory("intelligence-marketplace-malformed-github-hooks-")
+        val output = Files.createTempDirectory("source-projection-malformed-github-hooks-")
         MarketplaceProjector(output = {}).materialize(
-            repoRoot = repoRoot(),
+            repoRoot = fixtureRoot(),
             outRoot = output,
             provider = MarketplaceProvider.GitHub,
         )
         writeJson(
-            output.resolve(".github/plugin/kotlin-engineering/hooks.json"),
+            output.resolve(".github/plugin/fixture-plugin/hooks.json"),
             """
             {
               "version": 1,
@@ -453,7 +450,7 @@ class ProjectionPipelineTest {
 
         val result = ProjectionValidator(output = validation::add).validate(
             ProjectionValidationOptions(
-                repo = repoRoot(),
+                repo = fixtureRoot(),
                 hydrated = output,
             ),
         )
@@ -462,9 +459,10 @@ class ProjectionPipelineTest {
         assertTrue(validation.any { it.contains("hook event `Stop` must be an array") })
     }
 
-    private fun repoRoot(): Path =
+    private fun fixtureRoot(): Path =
         generateSequence(Path.of(".").toAbsolutePath().normalize()) { it.parent }
-            .first { it.resolve("source").resolve("adaptable.marketplace.json").toFile().isFile }
+            .map { it.resolve(".github/fixtures/source-projection") }
+            .first { it.resolve("source/adaptable.marketplace.json").toFile().isFile }
 
     private fun writeJson(path: Path, content: String) {
         path.parent.createDirectories()
@@ -472,8 +470,7 @@ class ProjectionPipelineTest {
     }
 
     private fun minimalMarketplaceRepository(): Path {
-        val repository = Files.createTempDirectory("intelligence-marketplace-source-")
-        repository.resolve("schemas").createDirectories()
+        val repository = Files.createTempDirectory("source-projection-source-")
         writeJson(
             repository.resolve("source").resolve("adaptable.marketplace.json"),
             """

@@ -10,7 +10,7 @@ usage() {
   cat >&2 <<'USAGE'
 Usage: .github/scripts/verify-release-assets.sh --release-dir <dir> --tag <vX.Y.Z>
 
-Verify a downloaded Intelligence release directory. The directory must contain
+Verify a downloaded projector release directory. The directory must contain
 one platform-neutral Kotlin/JVM CLI archive and SHA256SUMS.
 USAGE
 }
@@ -39,11 +39,18 @@ done
 
 [[ -n "$release_dir" ]] || { usage; die "--release-dir is required"; }
 [[ -n "$tag" ]] || { usage; die "--tag is required"; }
-[[ "$tag" == v* ]] || die "--tag must start with v: $tag"
+[[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "--tag must match vX.Y.Z: $tag"
 [[ -d "$release_dir" ]] || die "Release directory not found: $release_dir"
 [[ -f "${release_dir}/SHA256SUMS" ]] || die "SHA256SUMS not found in $release_dir"
 
-python3 - "$release_dir" "$tag" <<'PY'
+repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
+distribution_name="$(sed -n 's/^distributionName=//p' "${repo_root}/gradle.properties")"
+[[ -n "$distribution_name" && "$distribution_name" != *$'\n'* ]] || \
+  die "gradle.properties must define distributionName exactly once"
+[[ "$distribution_name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || \
+  die "distributionName contains unsupported characters: ${distribution_name}"
+
+python3 - "$release_dir" "$tag" "$distribution_name" <<'PY'
 import hashlib
 import tarfile
 import sys
@@ -52,11 +59,12 @@ from pathlib import Path
 
 release_dir = Path(sys.argv[1])
 tag = sys.argv[2]
+distribution_name = sys.argv[3]
 
-expected_assets = {f"intelligence-{tag}.tar.gz"}
+expected_assets = {f"{distribution_name}-{tag}.tar.gz"}
 required_members = {
-    "intelligence/bin/intelligence",
-    "intelligence/bin/intelligence.bat",
+    f"{distribution_name}/bin/{distribution_name}",
+    f"{distribution_name}/bin/{distribution_name}.bat",
 }
 forbidden_runtime_suffixes = (".py", ".pyc", ".pyo", ".rs", ".so", ".dylib", ".jnilib", ".dll", ".exe")
 
@@ -68,7 +76,7 @@ def fail(message: str) -> None:
 actual_assets = {
     path.name
     for path in release_dir.iterdir()
-    if path.is_file() and path.name.startswith("intelligence-") and path.name.endswith(".tar.gz")
+    if path.is_file() and path.name.startswith(f"{distribution_name}-") and path.name.endswith(".tar.gz")
 }
 
 unexpected_assets = sorted(actual_assets - expected_assets)
@@ -120,14 +128,18 @@ for asset_name in sorted(expected_assets):
         unexpected_members = sorted(
             name
             for name in regular_files
-            if name not in required_members and not (name.startswith("intelligence/lib/") and name.endswith(".jar"))
+            if name not in required_members and not (name.startswith(f"{distribution_name}/lib/") and name.endswith(".jar"))
         )
         if unexpected_members:
             fail(f"{asset_name} contains unexpected runtime member: {unexpected_members}")
 
-        jar_members = sorted(name for name in regular_files if name.startswith("intelligence/lib/") and name.endswith(".jar"))
+        jar_members = sorted(
+            name
+            for name in regular_files
+            if name.startswith(f"{distribution_name}/lib/") and name.endswith(".jar")
+        )
         if not jar_members:
-            fail(f"{asset_name} is missing runtime JARs under intelligence/lib/")
+            fail(f"{asset_name} is missing runtime JARs under {distribution_name}/lib/")
 
         for jar_member in jar_members:
             extracted = archive.extractfile(jar_member)
@@ -144,5 +156,5 @@ for asset_name in sorted(expected_assets):
     if missing_members:
         fail(f"{asset_name} is missing archive member: {missing_members}")
 
-print(f"Verified Intelligence release assets for {tag} in {release_dir}")
+print(f"Verified projector release assets for {tag} in {release_dir}")
 PY

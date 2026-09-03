@@ -12,6 +12,6 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "intelligence"
+rootProject.name = providers.gradleProperty("distributionName").get()
 
 include("cli")

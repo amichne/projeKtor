@@ -3,5 +3,16 @@
   "schemaVersion": 1,
   "name": "fixture-plugin",
   "version": "0.1.0",
-  "description": "Minimal source projection action fixture."
+  "description": "Minimal source-projection action fixture.",
+  "hooks": [
+    {
+      "type": "HOOK",
+      "source": {
+        "type": "LOCAL_SOURCE",
+        "path": "./"
+      },
+      "path": "hooks/fixture-hook.hook.json",
+      "name": "fixture-hook"
+    }
+  ]
 }

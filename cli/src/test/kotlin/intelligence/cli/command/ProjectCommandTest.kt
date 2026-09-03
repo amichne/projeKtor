@@ -1,5 +1,6 @@
 package intelligence.cli.command
 
+import intelligence.cli.BuildInfo
 import intelligence.cli.io.JsonFiles
 import intelligence.cli.io.arrayValue
 import intelligence.cli.io.stringValue
@@ -11,7 +12,8 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
-import com.github.ajalt.clikt.testing.test
+import com.github.ajalt.clikt.core.CliktError
+import com.github.ajalt.clikt.core.parse
 import org.junit.jupiter.api.io.TempDir
 import kotlinx.serialization.json.jsonObject
 
@@ -21,10 +23,10 @@ class ProjectCommandTest {
 
     @Test
     fun `root help exposes only projection`() {
-        val result = IntelligenceCommand().test("--help")
+        val result = RootCommand().test("--help")
 
         assertEquals(0, result.statusCode)
-        assertTrue(result.stdout.startsWith("Project provider-neutral agent tooling"))
+        assertTrue(result.stdout.contains("Project provider-neutral agent tooling"))
         assertTrue(result.stdout.lineSequence().any { line -> line.trimStart().startsWith("project ") })
         listOf("doctor", "setup", "validate", "marketplace", "rpc", "install", "publish").forEach { command ->
             assertFalse(result.stdout.lineSequence().any { line -> line.trimStart().startsWith("$command ") })
@@ -33,9 +35,9 @@ class ProjectCommandTest {
 
     @Test
     fun `project reports argument failures as structured stdout`() {
-        val missing = IntelligenceCommand().test("project")
-        val unsupported = IntelligenceCommand().test(
-            "project --source /tmp/source --harness cursor --out /tmp/output",
+        val missing = RootCommand().test("project")
+        val unsupported = RootCommand().test(
+            "project", "--source", "/tmp/source", "--harness", "cursor", "--out", "/tmp/output",
         )
 
         assertEquals(1, missing.statusCode)
@@ -51,8 +53,8 @@ class ProjectCommandTest {
         val source = minimalMarketplaceSource()
         val output = temporaryDirectory.resolve("codex")
 
-        val result = IntelligenceCommand().test(
-            "project --source $source --harness codex --out $output",
+        val result = RootCommand().test(
+            "project", "--source", source.toString(), "--harness", "codex", "--out", output.toString(),
         )
 
         assertEquals(0, result.statusCode, result.stderr)
@@ -76,8 +78,8 @@ class ProjectCommandTest {
         val source = minimalMarketplaceSource()
         val output = temporaryDirectory.resolve("github-copilot")
 
-        val result = IntelligenceCommand().test(
-            "project --source $source --harness github-copilot --out $output",
+        val result = RootCommand().test(
+            "project", "--source", source.toString(), "--harness", "github-copilot", "--out", output.toString(),
         )
 
         assertEquals(0, result.statusCode, result.stderr)
@@ -108,8 +110,8 @@ class ProjectCommandTest {
         val source = minimalMarketplaceSource()
         val sentinel = source.resolve("keep.txt").toFile().also { it.writeText("keep") }
 
-        val result = IntelligenceCommand().test(
-            "project --source $source --harness codex --out $source",
+        val result = RootCommand().test(
+            "project", "--source", source.toString(), "--harness", "codex", "--out", source.toString(),
         )
 
         assertEquals(1, result.statusCode)
@@ -123,8 +125,8 @@ class ProjectCommandTest {
         val output = temporaryDirectory.resolve("existing-output").also { it.createDirectories() }
         val sentinel = output.resolve("keep.txt").toFile().also { it.writeText("keep") }
 
-        val result = IntelligenceCommand().test(
-            "project --source $source --harness codex --out $output",
+        val result = RootCommand().test(
+            "project", "--source", source.toString(), "--harness", "codex", "--out", output.toString(),
         )
 
         assertEquals(1, result.statusCode)
@@ -134,10 +136,10 @@ class ProjectCommandTest {
 
     @Test
     fun `version option prints packaged version`() {
-        val result = IntelligenceCommand().test("--version")
+        val result = RootCommand().test("--version")
 
         assertEquals(0, result.statusCode)
-        assertTrue(result.stdout.trim().startsWith("intelligence version "))
+        assertTrue(result.stdout.trim().startsWith("${BuildInfo.NAME} version "))
     }
 
     private fun minimalMarketplaceSource(): Path =
@@ -284,4 +286,31 @@ class ProjectCommandTest {
         path.parent.createDirectories()
         JsonFiles.writeObject(path, JsonFiles.json.parseToJsonElement(content).let { element -> element as kotlinx.serialization.json.JsonObject })
     }
+}
+
+private data class CommandResult(
+    val stdout: String,
+    val stderr: String,
+    val statusCode: Int,
+)
+
+private fun RootCommand.test(vararg arguments: String): CommandResult {
+    val stdout = StringBuilder()
+    val stderr = StringBuilder()
+    var statusCode = 0
+    configureContext {
+        echoMessage = { _, message, trailingNewline, error ->
+            val destination = if (error) stderr else stdout
+            destination.append(message)
+            if (trailingNewline) destination.append('\n')
+        }
+        exitProcess = { statusCode = it }
+    }
+    try {
+        parse(arguments.toList())
+    } catch (failure: CliktError) {
+        echoFormattedHelp(failure)
+        statusCode = failure.statusCode
+    }
+    return CommandResult(stdout.toString(), stderr.toString(), statusCode)
 }

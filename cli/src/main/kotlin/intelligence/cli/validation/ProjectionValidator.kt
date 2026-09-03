@@ -1,5 +1,6 @@
 package intelligence.cli.validation
 
+import intelligence.cli.BuildInfo
 import intelligence.cli.io.JsonFiles
 import intelligence.cli.io.arrayValue
 import intelligence.cli.io.objectValue
@@ -29,10 +30,7 @@ internal class ProjectionValidator(
         }
 
         val issues = mutableListOf<String>()
-        validateRetiredRootPaths(repository, issues)
         validateOptionalJsonSyntax(repository.resolve(SOURCE_ROOT), issues)
-        validateOptionalJsonSyntax(repository.resolve(SCHEMAS_ROOT), issues)
-        validateOptionalJsonSyntax(repository.resolve(INTELLIGENCE_ROOT), issues)
         validateMarketplaceSource(repository, issues)
         options.hydrated?.let { hydrated ->
             validateHydratedOutput(hydrated.toAbsolutePath().normalize(), issues)
@@ -48,19 +46,8 @@ internal class ProjectionValidator(
         }
     }
 
-    private fun validateRetiredRootPaths(repo: Path, issues: MutableList<String>) {
-        RETIRED_ROOT_PATHS
-            .map(repo::resolve)
-            .filter(Path::exists)
-            .forEach { path -> issues += "retired root path remains: ${path.relativeToUnix(repo)}" }
-    }
-
-    private fun validateJsonSyntax(root: Path, issues: MutableList<String>) {
-        if (!root.exists()) {
-            issues += "missing source root: ${root.name}"
-            return
-        }
-
+    private fun validateOptionalJsonSyntax(root: Path, issues: MutableList<String>) {
+        if (!root.exists()) return
         walkRegularFiles(root)
             .filter { it.name.endsWith(".json") }
             .forEach { path ->
@@ -70,12 +57,6 @@ internal class ProjectionValidator(
                     issues += "invalid JSON ${path.relativeToUnix(root.parent)}: ${error.message}"
                 }
             }
-    }
-
-    private fun validateOptionalJsonSyntax(root: Path, issues: MutableList<String>) {
-        if (root.exists()) {
-            validateJsonSyntax(root, issues)
-        }
     }
 
     private fun validateMarketplaceSource(repo: Path, issues: MutableList<String>) {
@@ -855,9 +836,8 @@ internal class ProjectionValidator(
     private companion object {
         val SOURCE_ROOT: Path = Path.of("source")
         val ADAPTABLE_MARKETPLACE_PATH: Path = SOURCE_ROOT.resolve("adaptable.marketplace.json")
-        val SCHEMAS_ROOT: Path = Path.of("schemas")
-        val INTELLIGENCE_ROOT: Path = Path.of(".intelligence")
-        val MARKETPLACE_LOCK_PATH: Path = INTELLIGENCE_ROOT.resolve("marketplace-lock.json")
+        val PROJECTOR_STATE_ROOT: Path = Path.of(".${BuildInfo.NAME}")
+        val MARKETPLACE_LOCK_PATH: Path = PROJECTOR_STATE_ROOT.resolve("marketplace-lock.json")
         val CODEX_PROVIDER_ROOT: Path = Path.of(".agents").resolve("plugins")
         val GITHUB_PROVIDER_ROOT: Path = Path.of(".github").resolve("plugin")
         val GITHUB_HOOK_COMMAND_FIELDS: Set<String> = setOf("bash", "powershell", "command")
@@ -893,10 +873,6 @@ internal class ProjectionValidator(
             "websiteURL",
             "privacyPolicyURL",
             "termsOfServiceURL",
-        )
-        val RETIRED_ROOT_PATHS: List<Path> = listOf(
-            Path.of("packages"),
-            Path.of("scripts"),
         )
         val SKIPPED_DIRECTORIES: Set<String> = setOf(
             ".git",

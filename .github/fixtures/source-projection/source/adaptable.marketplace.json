@@ -3,7 +3,7 @@
   "schemaVersion": 1,
   "name": "action-fixture",
   "owner": {
-    "name": "Intelligence"
+    "name": "Fixture Owner"
   },
   "plugins": [
     {
@@ -18,7 +18,7 @@
         },
         "version": "0.1.0"
       },
-      "description": "Minimal source projection action fixture.",
+      "description": "Minimal source-projection action fixture.",
       "tags": [
         "testing"
       ]

@@ -1,24 +1,30 @@
 plugins {
-    kotlin("jvm") version "2.4.0"
+    kotlin("jvm") version "2.4.10"
     application
 }
 
+val distributionName = providers.gradleProperty("distributionName").get()
+
 application {
     mainClass.set("intelligence.cli.MainKt")
-    applicationName = "intelligence"
+    applicationName = distributionName
 }
 
-val intelligenceVersion = providers.gradleProperty("intelligenceVersion")
+val distributionVersion = providers.gradleProperty("distributionVersion")
     .orElse("dev")
 
 val generatedBuildInfoDir = layout.buildDirectory.dir("generated/sources/build-info/kotlin")
 
-val generateBuildInfo by tasks.registering {
-    inputs.property("intelligenceVersion", intelligenceVersion)
+val generateBuildInfo = tasks.register("generateBuildInfo") {
+    inputs.property("distributionName", distributionName)
+    inputs.property("distributionVersion", distributionVersion)
     outputs.dir(generatedBuildInfoDir)
 
     doLast {
-        val escapedVersion = intelligenceVersion.get()
+        val escapedName = distributionName
+            .replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+        val escapedVersion = distributionVersion.get()
             .replace("\\", "\\\\")
             .replace("\"", "\\\"")
         val output = generatedBuildInfoDir.get()
@@ -30,6 +36,7 @@ val generateBuildInfo by tasks.registering {
             package intelligence.cli
 
             internal object BuildInfo {
+                const val NAME: String = "$escapedName"
                 const val VERSION: String = "$escapedVersion"
             }
             """.trimIndent() + "\n",
@@ -45,10 +52,7 @@ kotlin {
 }
 
 dependencies {
-    implementation("com.github.ajalt.clikt:clikt:5.1.0") {
-        exclude(group = "com.github.ajalt.mordant", module = "mordant")
-    }
-    implementation("com.github.ajalt.mordant:mordant-core:3.0.2")
+    implementation("com.github.ajalt.clikt:clikt-core:5.1.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
 
     testImplementation(kotlin("test"))
@@ -58,9 +62,10 @@ tasks.test {
     useJUnitPlatform()
     dependsOn(tasks.installDist)
     systemProperty(
-        "intelligence.installDir",
-        layout.buildDirectory.dir("install/intelligence").get().asFile.absolutePath,
+        "distribution.installDir",
+        layout.buildDirectory.dir("install/$distributionName").get().asFile.absolutePath,
     )
+    systemProperty("distribution.name", distributionName)
 }
 
 tasks.named("compileKotlin") {
@@ -68,10 +73,14 @@ tasks.named("compileKotlin") {
 }
 
 tasks.withType<AbstractArchiveTask>().configureEach {
-    archiveBaseName.set("intelligence")
+    archiveBaseName.set(distributionName)
     archiveVersion.set("")
     isPreserveFileTimestamps = false
     isReproducibleFileOrder = true
+}
+
+tasks.named<CreateStartScripts>("startScripts") {
+    outputDir = layout.buildDirectory.dir("scripts/$distributionName").get().asFile
 }
 
 tasks.named<Tar>("distTar") {

@@ -1,0 +1,9 @@
+{
+  "type": "HOOK",
+  "source": {
+    "type": "LOCAL_SOURCE",
+    "path": "./"
+  },
+  "path": "hooks/codex/fixture-hook.hooks.json",
+  "name": "fixture-hook"
+}

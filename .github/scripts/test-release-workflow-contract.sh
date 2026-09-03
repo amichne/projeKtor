@@ -1,131 +1,95 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2016 # Workflow expressions and shell variables are intentional literals.
 set -euo pipefail
+
+repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd -- "$repo_root"
 
 die() {
   printf 'error: %s\n' "$*" >&2
   exit 1
 }
 
-resolve_repo_root() {
-  local script_dir
-  script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-  cd -- "${script_dir}/../.." && pwd
+require_literal() {
+  local path="$1"
+  local literal="$2"
+  grep -Fq -- "$literal" "$path" || die "$path must contain: $literal"
 }
 
-require_contains() {
-  local file_path="$1"
-  local expected="$2"
-  local description="$3"
-  grep -Fq -- "$expected" "$file_path" || die "${description}: missing '${expected}' in ${file_path}"
-}
-
-require_not_contains() {
-  local file_path="$1"
-  local unexpected="$2"
-  local description="$3"
-  ! grep -Fq -- "$unexpected" "$file_path" || die "${description}: found '${unexpected}' in ${file_path}"
+reject_literal() {
+  local path="$1"
+  local literal="$2"
+  ! grep -Fq -- "$literal" "$path" || die "$path must not contain: $literal"
 }
 
 require_order() {
-  local file_path="$1"
+  local path="$1"
   local earlier="$2"
   local later="$3"
-  local description="$4"
   local earlier_line
   local later_line
-  earlier_line="$(grep -nF -- "$earlier" "$file_path" | head -1 | cut -d: -f1)"
-  later_line="$(grep -nF -- "$later" "$file_path" | head -1 | cut -d: -f1)"
-  [[ -n "$earlier_line" ]] || die "${description}: missing earlier marker '${earlier}'"
-  [[ -n "$later_line" ]] || die "${description}: missing later marker '${later}'"
-  [[ "$earlier_line" -lt "$later_line" ]] || die "${description}: '${earlier}' must appear before '${later}'"
+  earlier_line="$(grep -nF -- "$earlier" "$path" | head -1 | cut -d: -f1)"
+  later_line="$(grep -nF -- "$later" "$path" | head -1 | cut -d: -f1)"
+  [[ -n "$earlier_line" && -n "$later_line" && "$earlier_line" -lt "$later_line" ]] || \
+    die "$path must place '$earlier' before '$later'"
 }
 
-repo_root="$(resolve_repo_root)"
-distribution_workflow="${repo_root}/.github/workflows/distribute-intelligence.yml"
-release_workflow="${repo_root}/.github/workflows/release.yml"
-release_asset_verifier="${repo_root}/.github/scripts/verify-release-assets.sh"
-release_state_verifier="${repo_root}/.github/scripts/verify-release-state.sh"
-source_projection_action="${repo_root}/action.yml"
-source_projection_action_test="${repo_root}/.github/scripts/test-source-projection-action.sh"
-homebrew_test="${repo_root}/packaging/homebrew/scripts/test-formula.py"
+ci=.github/workflows/ci.yml
+release=.github/workflows/release.yml
 
-for path in \
-  "$distribution_workflow" \
-  "$release_workflow" \
-  "$release_asset_verifier" \
-  "$release_state_verifier" \
-  "$source_projection_action" \
-  "$source_projection_action_test" \
-  "$homebrew_test"
-do
-  [[ -f "$path" ]] || die "Required release file is missing: $path"
+for path in "$ci" "$release" action.yml .github/scripts/verify-release-assets.sh .github/scripts/verify-release-state.sh; do
+  [[ -f "$path" ]] || die "required release path is missing: $path"
 done
 
-require_contains "$distribution_workflow" "Validate CLI source" "Distribution workflow must keep the PR/main validation gate"
-require_contains "$distribution_workflow" ".github/scripts/test-release-asset-verifier.sh" "Distribution workflow must test the release asset verifier"
-require_contains "$distribution_workflow" ".github/scripts/test-release-workflow-contract.sh" "Distribution workflow must test the release workflow contract"
-require_contains "$distribution_workflow" ".github/scripts/test-source-projection-action.sh" "Distribution workflow must test the source projection action contract"
-require_contains "$distribution_workflow" "source-projection-action:" "Distribution workflow must exercise the local composite action"
-require_contains "$distribution_workflow" "uses: ./" "Distribution workflow must invoke the checked-out action"
-require_contains "$distribution_workflow" "ubuntu-latest" "Action contract must run on Linux"
-require_contains "$distribution_workflow" "macos-latest" "Action contract must run on macOS"
-require_contains "$distribution_workflow" "windows-latest" "Action contract must run on Windows"
-require_contains "$distribution_workflow" ":cli:distTar" "Distribution workflow must build the JVM distribution with Gradle"
-require_contains "$distribution_workflow" "intelligence-\${version}.tar.gz" "Distribution workflow must create one platform-neutral JVM archive"
-require_contains "$distribution_workflow" "project --source" "Distribution workflow must smoke the stable projector surface"
-require_contains "$distribution_workflow" "--harness codex" "Distribution workflow must smoke the Codex projection"
-require_contains "$distribution_workflow" "--harness github-copilot" "Distribution workflow must smoke the GitHub Copilot projection"
-require_not_contains "$distribution_workflow" "marketplace search" "Distribution workflow must not call the removed marketplace search command"
-require_not_contains "$distribution_workflow" "--provider source" "Distribution workflow must not call the removed source-provider option"
-require_not_contains "$distribution_workflow" 'tags:' "Distribution workflow must not own release tags"
-require_not_contains "$distribution_workflow" "workflow_dispatch:" "Distribution workflow must not own manual releases"
-require_not_contains "$distribution_workflow" "publish-release:" "Distribution workflow must not publish GitHub releases"
-require_not_contains "$distribution_workflow" "Render and push Homebrew tap" "Distribution workflow must not publish the Homebrew tap"
-require_not_contains "$distribution_workflow" "cargo" "Distribution workflow must not build Rust"
-require_not_contains "$distribution_workflow" "intelligence-tui" "Distribution workflow must not package the removed TUI"
-require_not_contains "$distribution_workflow" "nativeCompile" "Distribution workflow must not build native executables"
-require_not_contains "$distribution_workflow" "graalvm" "Distribution workflow must use the JVM toolchain"
+[[ ! -e .github/workflows/distribute-intelligence.yml ]] || die 'the superseded distribution workflow must be removed'
+[[ ! -e .github/workflows/docs.yml ]] || die 'the unrelated documentation workflow must be removed'
 
-require_contains "$release_workflow" "release_type:" "Release workflow must expose the KAST-style release type input"
-require_contains "$release_workflow" "Bump version" "Release workflow must compute and push release tags"
-require_contains "$release_workflow" "Release workflow_dispatch must run from main" "Release workflow must protect stable publications from branch heads"
-require_contains "$release_workflow" "Ensure draft release exists" "Release workflow must stage assets into a draft release"
-require_contains "$release_workflow" "Generate and verify SHA256SUMS" "Release workflow must verify checksums before publication"
-require_contains "$release_workflow" ".github/scripts/verify-release-assets.sh" "Release workflow must reuse the asset verifier"
-require_contains "$release_workflow" ".github/scripts/test-source-projection-action.sh" "Release workflow must test the source projection action contract"
-require_contains "$release_workflow" ":cli:distTar" "Release workflow must build the JVM distribution with Gradle"
-require_contains "$release_workflow" "intelligence-\${version}.tar.gz" "Release workflow must create one platform-neutral JVM archive"
-require_contains "$release_workflow" "project --source" "Release workflow must smoke the stable projector surface"
-require_contains "$release_workflow" "--harness codex" "Release workflow must smoke the Codex projection"
-require_contains "$release_workflow" "--harness github-copilot" "Release workflow must smoke the GitHub Copilot projection"
-require_not_contains "$release_workflow" "marketplace search" "Release workflow must not call the removed marketplace search command"
-require_not_contains "$release_workflow" "--provider source" "Release workflow must not call the removed source-provider option"
-require_contains "$release_workflow" "Publish draft release with CI annotation" "Release workflow must publish the draft after assets are present"
-require_contains "$release_workflow" "Render and push Homebrew tap" "Release workflow must render and push the Homebrew tap"
-require_contains "$release_workflow" "gh repo clone amichne/homebrew-intelligence" "Release workflow must push the generated tap mirror"
-require_contains "$release_workflow" "git -C homebrew-tap remote set-url origin" "Release workflow must authenticate the tap clone before pushing"
-require_contains "$release_workflow" "git -C homebrew-tap add -A" "Release workflow must stage all tap changes including deletions"
-require_contains "$release_workflow" "Verify published release state" "Release workflow must have final published-state verification"
-require_contains "$release_workflow" ".github/scripts/verify-release-state.sh" "Release workflow must call the final release verifier"
-require_contains "$release_workflow" "needs.publish-release.result" "Final verification must read the publication result"
-require_contains "$release_workflow" "Publish release finished with result" "Final verification must fail when publication did not complete"
-require_order "$release_workflow" "Generate and verify SHA256SUMS" "Upload release assets" "Release must verify assets before upload"
-require_order "$release_workflow" "Upload release assets" "Publish draft release with CI annotation" "Release must upload assets before publishing"
-require_order "$release_workflow" "Publish draft release with CI annotation" "Render and push Homebrew tap" "Release must publish GitHub assets before Homebrew"
-require_order "$release_workflow" "Render and push Homebrew tap" "verify-release-state:" "Final verification must run after Homebrew publication"
-require_not_contains "$release_workflow" "cargo" "Release workflow must not build Rust"
-require_not_contains "$release_workflow" "intelligence-tui" "Release workflow must not package the removed TUI"
-require_not_contains "$release_workflow" "nativeCompile" "Release workflow must not build native executables"
-require_not_contains "$release_workflow" "graalvm" "Release workflow must use the JVM toolchain"
+for workflow in "$ci" "$release"; do
+  ruby -e 'require "yaml"; YAML.safe_load(File.read(ARGV.fetch(0)), aliases: true)' "$workflow" || \
+    die "$workflow is not valid YAML"
+  require_literal "$workflow" 'actions/checkout@'
+  require_literal "$workflow" 'actions/setup-java@'
+  require_literal "$workflow" 'gradle/actions/setup-gradle@'
+  require_literal "$workflow" './gradlew check --no-daemon'
+  require_literal "$workflow" '.github/scripts/test-distribution-identity.sh'
+  require_literal "$workflow" '.github/scripts/test-repository-boundary.sh'
+  reject_literal "$workflow" 'amichne/'
+  reject_literal "$workflow" 'github.com/'
+  reject_literal "$workflow" 'Homebrew'
+  reject_literal "$workflow" 'homebrew'
+done
 
-require_contains "$release_asset_verifier" "intelligence/bin/intelligence" "Release asset verifier must require the JVM launcher"
-require_contains "$release_asset_verifier" "intelligence/bin/intelligence.bat" "Release asset verifier must require the Windows JVM launcher"
-require_contains "$release_asset_verifier" "lib/" "Release asset verifier must require runtime JARs"
-require_not_contains "$release_asset_verifier" "linux-x64" "Release asset verifier must be platform neutral"
-require_not_contains "$release_asset_verifier" "intelligence-tui" "Release asset verifier must reject the removed TUI"
-require_contains "$release_state_verifier" "gh release download" "Release state verifier must download release assets"
-require_contains "$release_state_verifier" ".github/scripts/verify-release-assets.sh" "Release state verifier must reuse the asset verifier"
-require_contains "$release_state_verifier" "releases/latest" "Release state verifier must prove stable releases are latest"
-require_contains "$release_state_verifier" "homebrew-intelligence" "Release state verifier must prove stable Homebrew state"
+require_literal "$ci" 'uses: ./'
+require_literal "$ci" 'ubuntu-latest'
+require_literal "$ci" 'macos-latest'
+require_literal "$ci" 'windows-latest'
+require_literal "$ci" 'SOURCE_PROJECTION_CLI:'
+require_literal "$ci" 'harness: codex'
+require_literal "$ci" 'harness: github-copilot'
+
+require_literal "$release" 'release_type:'
+require_literal "$release" 'major)'
+require_literal "$release" 'minor)'
+require_literal "$release" 'patch)'
+require_literal "$release" 'Release workflow_dispatch must run from main'
+require_literal "$release" 'gh release create "$tag" --draft --verify-tag'
+require_literal "$release" ':cli:distTar'
+require_literal "$release" '.github/scripts/verify-release-assets.sh'
+require_literal "$release" 'actions/upload-artifact@'
+require_literal "$release" 'actions/download-artifact@'
+require_literal "$release" 'gh release upload "$RELEASE_TAG" dist/* --clobber'
+require_literal "$release" 'gh release edit "$RELEASE_TAG"'
+require_literal "$release" '${{ github.server_url }}/${{ github.repository }}/actions/runs/'
+require_literal "$release" '.github/scripts/verify-release-state.sh'
+require_order "$release" 'Build and verify distribution' 'Upload release assets'
+require_order "$release" 'Verify and publish release' 'Verify published state'
+
+for path in .github/scripts/verify-release-assets.sh .github/scripts/verify-release-state.sh; do
+  require_literal "$path" 'distributionName='
+  reject_literal "$path" 'intelligence-'
+  reject_literal "$path" 'amichne/'
+  reject_literal "$path" 'Homebrew'
+  reject_literal "$path" 'homebrew'
+done
 
 printf 'OK release workflow contract\n'

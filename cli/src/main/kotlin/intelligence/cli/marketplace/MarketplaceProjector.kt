@@ -1,10 +1,10 @@
 package intelligence.cli.marketplace
 
+import intelligence.cli.BuildInfo
 import intelligence.cli.io.DigestAlgorithm
 import intelligence.cli.io.Digests
 import intelligence.cli.io.FileSystem
 import intelligence.cli.io.JsonFiles
-import intelligence.cli.io.ProcessRunner
 import intelligence.cli.io.arrayValue
 import intelligence.cli.io.jsonArrayOfStrings
 import intelligence.cli.io.normalizedAbsolute
@@ -38,7 +38,6 @@ import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 
 internal class MarketplaceProjector(
-    private val processRunner: ProcessRunner = ProcessRunner.system(),
     private val output: (String) -> Unit = ::println,
     resolvedAssetRoot: Path = defaultResolvedAssetRoot(),
 ) {
@@ -59,36 +58,8 @@ internal class MarketplaceProjector(
             when (provider) {
                 MarketplaceProvider.Codex -> materializeCodexMarketplace(repository, outputRoot, generatedAt, sourceSha, resolver)
                 MarketplaceProvider.GitHub -> materializeGitHubMarketplace(repository, outputRoot, resolver)
-                MarketplaceProvider.All -> materializeAllMarketplaces(repository, outputRoot, generatedAt, sourceSha, resolver)
             }
         }
-    }
-
-    private fun materializeAllMarketplaces(
-        repoRoot: Path,
-        outRoot: Path,
-        generatedAt: String?,
-        sourceSha: String?,
-        resolver: RemoteMarketplaceResolver,
-    ) {
-        FileSystem.replaceDirectory(outRoot)
-        renderDefaultMarketplaces(repoRoot, outRoot, generatedAt, sourceSha, resolver)
-        outRoot.resolve("README.md").writeText(
-            """
-            # Intelligence Marketplace
-
-            This directory is generated from a provider-neutral source graph.
-
-            Provider-native marketplace projections are scoped under their expected entrypoints:
-
-            - `.agents/plugins/marketplace.json`
-            - `.github/plugin/marketplace.json`
-
-            Each provider entrypoint owns its plugin payload directories beside its `marketplace.json` so provider-default paths stay native.
-            """.trimIndent() + "\n",
-            Charsets.UTF_8,
-        )
-        output("materialized marketplace at $outRoot")
     }
 
     private fun materializeCodexMarketplace(
@@ -100,18 +71,6 @@ internal class MarketplaceProjector(
     ) {
         FileSystem.replaceDirectory(outRoot)
         renderCodexMarketplace(repoRoot, outRoot, generatedAt, sourceSha, resolver)
-        outRoot.resolve("README.md").writeText(
-            """
-            # Intelligence Codex Marketplace
-
-            This branch is generated from the referential source graph on `main`.
-
-            Codex expects the marketplace manifest at `.agents/plugins/marketplace.json` and plugin payloads under `.agents/plugins/<plugin>/`. Each plugin payload is fully hydrated from the provider-neutral primitives and contains its own `.codex-plugin/plugin.json`.
-
-            Intelligence only projects these files; it does not register or install them.
-            """.trimIndent() + "\n",
-            Charsets.UTF_8,
-        )
         output("materialized Codex marketplace at $outRoot")
     }
 
@@ -122,28 +81,7 @@ internal class MarketplaceProjector(
     ) {
         FileSystem.replaceDirectory(outRoot)
         renderGitHubMarketplace(repoRoot, outRoot, resolver)
-        outRoot.resolve("README.md").writeText(
-            """
-            # Intelligence GitHub Marketplace
-
-            This directory is generated from a provider-neutral source graph.
-
-            GitHub Copilot expects the marketplace manifest at `.github/plugin/marketplace.json` and plugin payloads under `.github/plugin/<plugin>/`. Each plugin payload is fully hydrated from the provider-neutral primitives. Intelligence does not register or install the generated marketplace.
-            """.trimIndent() + "\n",
-            Charsets.UTF_8,
-        )
         output("materialized GitHub marketplace at $outRoot")
-    }
-
-    private fun renderDefaultMarketplaces(
-        repoRoot: Path,
-        outRoot: Path,
-        generatedAt: String?,
-        sourceSha: String?,
-        resolver: RemoteMarketplaceResolver,
-    ) {
-        renderCodexMarketplace(repoRoot, outRoot, generatedAt, sourceSha, resolver)
-        renderGitHubMarketplace(repoRoot, outRoot, resolver)
     }
 
     private fun renderCodexMarketplace(
@@ -780,7 +718,7 @@ internal class MarketplaceProjector(
     }
 
     private fun refuseRepositoryOutput(repoRoot: Path, outRoot: Path) {
-        val derivedBuildOutput = repoRoot.resolve("build").resolve("intelligence").resolve("marketplace").normalizedAbsolute()
+        val derivedBuildOutput = repoRoot.resolve("build").resolve(BuildInfo.NAME).resolve("marketplace").normalizedAbsolute()
         if (outRoot == derivedBuildOutput || outRoot.startsWith(derivedBuildOutput)) {
             return
         }
@@ -1037,7 +975,7 @@ internal class MarketplaceProjector(
     private inner class RemoteMarketplaceResolver(
         private val repoRoot: Path,
     ) : AutoCloseable {
-        private val tempRoot: Path = Files.createTempDirectory("intelligence-marketplace-resolve-")
+        private val tempRoot: Path = Files.createTempDirectory("${BuildInfo.NAME}-marketplace-resolve-")
         private val resolvedByName = mutableMapOf<String, ResolvedMarketplace>()
 
         fun resolve(remote: ExternalMarketplace): ResolvedMarketplace =
@@ -1278,7 +1216,7 @@ internal class MarketplaceProjector(
         const val CODEX_PLUGIN_DIR = ".codex-plugin"
         val SOURCE_ROOT: Path = Path.of("source")
         val ADAPTABLE_MARKETPLACE_PATH: Path = SOURCE_ROOT.resolve("adaptable.marketplace.json")
-        val INTELLIGENCE_ROOT: Path = Path.of(".intelligence")
+        val PROJECTOR_STATE_ROOT: Path = Path.of(".${BuildInfo.NAME}")
         val CODEX_MARKETPLACE_ROOT: Path = Path.of(".agents").resolve("plugins")
         val CODEX_BRANCH_MARKETPLACE_PATH: Path = CODEX_MARKETPLACE_ROOT.resolve("marketplace.json")
         val CODEX_BRANCH_PLUGINS_PATH: Path = CODEX_MARKETPLACE_ROOT
@@ -1289,7 +1227,7 @@ internal class MarketplaceProjector(
         const val GITHUB_MARKETPLACE_PLUGIN_ROOT = ".github/plugin"
         val GITHUB_AGENT_MODEL_FIELD = Regex("^model\\s*:.*$")
         val HOOK_COMMAND_PATH_RE = Regex("\\bhooks/[A-Za-z0-9_.-]+")
-        val MARKETPLACE_LOCK_PATH: Path = INTELLIGENCE_ROOT.resolve("marketplace-lock.json")
+        val MARKETPLACE_LOCK_PATH: Path = PROJECTOR_STATE_ROOT.resolve("marketplace-lock.json")
     }
 }
 
@@ -1380,7 +1318,7 @@ private fun JsonObject.requiredString(key: String): String =
 private fun Path.relativeToUnix(base: Path): String =
     base.relativize(this).toString().replace('\\', '/')
 
-private const val RESOLVED_ASSET_ROOT_ENV = "INTELLIGENCE_MARKETPLACE_ASSET_ROOT"
+private const val RESOLVED_ASSET_ROOT_ENV = "SOURCE_PROJECTION_ASSET_ROOT"
 
 private val CACHE_COMPONENT_RE = Regex("[^A-Za-z0-9_.-]+")
 
@@ -1388,7 +1326,7 @@ private fun defaultResolvedAssetRoot(): Path =
     System.getenv(RESOLVED_ASSET_ROOT_ENV)
         ?.takeIf { it.isNotBlank() }
         ?.toCliPath()
-        ?: Path.of(System.getProperty("user.home"), ".local", "share", "intelligence", "marketplace-assets")
+        ?: Path.of(System.getProperty("user.home"), ".local", "share", BuildInfo.NAME, "marketplace-assets")
 
 private fun cacheComponent(value: String): String =
     CACHE_COMPONENT_RE.replace(value, "_").trim('_').ifBlank { "_" }

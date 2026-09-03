@@ -1,8 +1,8 @@
 package intelligence.cli
 
-import intelligence.cli.command.IntelligenceCommand
+import intelligence.cli.command.RootCommand
 import com.github.ajalt.clikt.core.main
 
 fun main(args: Array<String>) {
-    IntelligenceCommand().main(args)
+    RootCommand().main(args)
 }

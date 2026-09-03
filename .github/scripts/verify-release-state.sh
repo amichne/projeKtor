@@ -10,22 +10,20 @@ usage() {
   cat >&2 <<'USAGE'
 Usage: .github/scripts/verify-release-state.sh --tag <vX.Y.Z> [options]
 
-Verify that an Intelligence release is fully published:
-  - GitHub release exists, is not draft, and has the expected stable/prerelease state.
+Verify that a projector release is fully published:
+  - GitHub release exists, is not draft, and is not a prerelease.
   - Release archives and SHA256SUMS pass local asset verification.
-  - Stable releases are the GitHub latest release and are reflected in Homebrew.
+  - The release is the repository's latest release.
 
 Options:
-  --repository <owner/repo>           GitHub repository. Defaults to amichne/intelligence.
-  --homebrew-repo <owner/repo>        Homebrew tap repository. Defaults to amichne/homebrew-intelligence.
-  --work-dir <dir>                    Directory for downloaded assets and tap clone. Defaults to a temp dir.
+  --repository <owner/repo>  GitHub repository. Defaults to GITHUB_REPOSITORY.
+  --work-dir <dir>           Directory for downloaded assets. Defaults to a temp dir.
 USAGE
 }
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 tag=""
-repository="amichne/intelligence"
-homebrew_repo="amichne/homebrew-intelligence"
+repository="${GITHUB_REPOSITORY:-}"
 work_dir=""
 
 while [[ $# -gt 0 ]]; do
@@ -40,11 +38,6 @@ while [[ $# -gt 0 ]]; do
       repository="$2"; shift 2 ;;
     --repository=*)
       repository="${1#--repository=}"; shift ;;
-    --homebrew-repo)
-      [[ $# -ge 2 ]] || die "Missing value for --homebrew-repo"
-      homebrew_repo="$2"; shift 2 ;;
-    --homebrew-repo=*)
-      homebrew_repo="${1#--homebrew-repo=}"; shift ;;
     --work-dir)
       [[ $# -ge 2 ]] || die "Missing value for --work-dir"
       work_dir="$2"; shift 2 ;;
@@ -58,19 +51,17 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "$tag" ]] || { usage; die "--tag is required"; }
-[[ "$tag" == v* ]] || die "--tag must start with v: $tag"
+[[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "--tag must match vX.Y.Z: $tag"
 [[ "$repository" == */* ]] || die "--repository must look like owner/repo"
-[[ "$homebrew_repo" == */* ]] || die "--homebrew-repo must look like owner/repo"
 command -v gh >/dev/null 2>&1 || die "gh is required"
 
-stable_release=false
-if [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  stable_release=true
-fi
+distribution_name="$(sed -n 's/^distributionName=//p' "${repo_root}/gradle.properties")"
+[[ -n "$distribution_name" && "$distribution_name" != *$'\n'* ]] || \
+  die "gradle.properties must define distributionName exactly once"
 
 cleanup_dir=""
 if [[ -z "$work_dir" ]]; then
-  cleanup_dir="$(mktemp -d "${TMPDIR:-/tmp}/intelligence-release-state.XXXXXX")"
+  cleanup_dir="$(mktemp -d "${TMPDIR:-/tmp}/projector-release-state.XXXXXX")"
   work_dir="$cleanup_dir"
 else
   mkdir -p "$work_dir"
@@ -89,39 +80,18 @@ require_false() {
   [[ "$value" == "false" ]] || die "$message"
 }
 
-require_true() {
-  local value="$1"
-  local message="$2"
-  [[ "$value" == "true" ]] || die "$message"
-}
-
 is_draft="$(gh release view "$tag" --repo "$repository" --json isDraft --jq .isDraft)"
 is_prerelease="$(gh release view "$tag" --repo "$repository" --json isPrerelease --jq .isPrerelease)"
 require_false "$is_draft" "GitHub release ${tag} is still a draft"
-if [[ "$stable_release" == "true" ]]; then
-  require_false "$is_prerelease" "Stable release ${tag} is marked prerelease"
-  latest_tag="$(gh api "repos/${repository}/releases/latest" --jq .tag_name)"
-  [[ "$latest_tag" == "$tag" ]] || die "Stable release ${tag} is not latest; latest is ${latest_tag}"
-else
-  require_true "$is_prerelease" "Prerelease ${tag} is not marked prerelease"
-fi
+require_false "$is_prerelease" "Release ${tag} is marked prerelease"
+latest_tag="$(gh api "repos/${repository}/releases/latest" --jq .tag_name)"
+[[ "$latest_tag" == "$tag" ]] || die "Release ${tag} is not latest; latest is ${latest_tag}"
 
 release_dir="${work_dir}/release-assets"
 rm -rf "$release_dir"
 mkdir -p "$release_dir"
-gh release download "$tag" --repo "$repository" --dir "$release_dir" --pattern 'intelligence-*.tar.gz'
+gh release download "$tag" --repo "$repository" --dir "$release_dir" --pattern "${distribution_name}-*.tar.gz"
 gh release download "$tag" --repo "$repository" --dir "$release_dir" --pattern 'SHA256SUMS'
 "${repo_root}/.github/scripts/verify-release-assets.sh" --release-dir "$release_dir" --tag "$tag"
-
-if [[ "$stable_release" == "true" ]]; then
-  tap_dir="${work_dir}/homebrew-tap"
-  rm -rf "$tap_dir"
-  gh repo clone "$homebrew_repo" "$tap_dir" -- --depth 1 >/dev/null
-  ruby -c "${tap_dir}/Formula/intelligence.rb" >/dev/null
-  python3 "${repo_root}/packaging/homebrew/scripts/verify-rendered-formula.py" \
-    --tag "$tag" \
-    --sha256s "${release_dir}/SHA256SUMS" \
-    --tap-root "$tap_dir"
-fi
 
 printf 'Verified published release state for %s\n' "$tag"

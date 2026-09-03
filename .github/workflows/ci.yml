@@ -1,0 +1,131 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate source and distribution
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Java
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+
+      - name: Run repository gates
+        run: |
+          set -euo pipefail
+          ./gradlew check --no-daemon
+          .github/scripts/test-dependency-versions.sh
+          .github/scripts/test-distribution-identity.sh
+          .github/scripts/test-release-asset-verifier.sh
+          .github/scripts/test-release-workflow-contract.sh
+          .github/scripts/test-repository-boundary.sh
+          .github/scripts/test-source-projection-action.sh
+          git diff --check
+
+      - name: Verify a release-shaped distribution
+        run: |
+          set -euo pipefail
+          distribution_name="$(sed -n 's/^distributionName=//p' gradle.properties)"
+          version="v0.0.0"
+          ./gradlew :cli:distTar --no-daemon -PdistributionVersion="$version"
+          mkdir -p dist
+          cp "cli/build/distributions/${distribution_name}.tar.gz" "dist/${distribution_name}-${version}.tar.gz"
+          (cd dist && sha256sum "${distribution_name}-${version}.tar.gz" > SHA256SUMS)
+          .github/scripts/verify-release-assets.sh --release-dir dist --tag "$version"
+
+  action:
+    name: Action (${{ matrix.os }}, ${{ matrix.harness }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            harness: codex
+            manifest: .agents/plugins/marketplace.json
+          - os: macos-latest
+            harness: github-copilot
+            manifest: .github/plugin/marketplace.json
+          - os: windows-latest
+            harness: codex
+            manifest: .agents/plugins/marketplace.json
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Java
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+
+      - name: Build development CLI
+        id: distribution
+        run: |
+          set -euo pipefail
+          ./gradlew installDevelopmentCli --no-daemon
+          distribution_name="$(sed -n 's/^distributionName=//p' gradle.properties)"
+          workspace="$GITHUB_WORKSPACE"
+          if [[ "${RUNNER_OS}" == "Windows" ]]; then
+            workspace="$(cygpath --unix "$workspace")"
+          fi
+          printf 'cli=%s/.local/%s/bin/%s\n' "$workspace" "$distribution_name" "$distribution_name" >> "$GITHUB_OUTPUT"
+
+      - name: Project source
+        id: projection
+        uses: ./
+        env:
+          SOURCE_PROJECTION_CLI: ${{ steps.distribution.outputs.cli }}
+        with:
+          source: .github/fixtures/source-projection
+          harness: ${{ matrix.harness }}
+          output: ${{ runner.temp }}/projection
+          version: v0.0.0
+
+      - name: Verify action output
+        env:
+          FILES: ${{ steps.projection.outputs.files }}
+          MANIFEST: ${{ matrix.manifest }}
+          PROJECTION_PATH: ${{ steps.projection.outputs.projection-path }}
+          VERSION: ${{ steps.projection.outputs.version }}
+        run: |
+          set -euo pipefail
+          [[ "$FILES" =~ ^[1-9][0-9]*$ ]]
+          [[ "$VERSION" == "development" ]]
+          [[ -f "${PROJECTION_PATH}/${MANIFEST}" ]]
+
+      - name: Verify Windows read-only cleanup
+        if: runner.os == 'Windows'
+        run: ./gradlew :cli:test --tests intelligence.cli.io.FileSystemTest --no-daemon

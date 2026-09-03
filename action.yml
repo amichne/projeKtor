@@ -1,6 +1,5 @@
-name: Intelligence Source Projection
+name: Source Projection
 description: Project one provider-neutral agent-tooling source tree into one harness-native payload.
-author: Amichne
 
 inputs:
   source:
@@ -15,9 +14,13 @@ inputs:
     required: false
     default: ""
   version:
-    description: Intelligence release tag in vX.Y.Z form, or latest for the newest stable release.
+    description: Projector release tag in vX.Y.Z form, or latest for the newest stable release.
     required: false
     default: latest
+  token:
+    description: Token with contents:read access to private action release assets.
+    required: false
+    default: ""
 
 outputs:
   projection-path:
@@ -27,30 +30,34 @@ outputs:
     description: Number of files in the validated projection.
     value: ${{ steps.project.outputs.files }}
   version:
-    description: Exact Intelligence release tag used for projection.
+    description: Exact projector release tag used for projection.
     value: ${{ steps.project.outputs.version }}
 
 runs:
   using: composite
   steps:
     - name: Set up Java
-      uses: actions/setup-java@v5
+      uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
       with:
         distribution: temurin
         java-version: "21"
 
     - name: Set up Python
-      uses: actions/setup-python@v6
+      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
       with:
-        python-version: "3.13"
+        python-version: "3.14"
 
     - name: Project source
       id: project
       shell: bash
       env:
+        ACTION_API_URL: ${{ github.api_url }}
+        ACTION_REPOSITORY: ${{ github.action_repository }}
+        ACTION_SERVER_URL: ${{ github.server_url }}
         INPUT_SOURCE: ${{ inputs.source }}
         INPUT_HARNESS: ${{ inputs.harness }}
         INPUT_OUTPUT: ${{ inputs.output }}
+        INPUT_TOKEN: ${{ inputs.token }}
         INPUT_VERSION: ${{ inputs.version }}
       run: "${GITHUB_ACTION_PATH}/.github/actions/project/run.sh"
 

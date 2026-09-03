@@ -2,14 +2,16 @@ plugins {
     base
 }
 
+val distributionName = providers.gradleProperty("distributionName").get()
+
 tasks.register<Sync>("installDevelopmentCli") {
     group = "application"
-    description = "Update the repo-local Intelligence CLI from the Kotlin build output."
+    description = "Update the repository-local projector CLI from the Kotlin build output."
 
     dependsOn(":cli:installDist")
 
-    from(project(":cli").layout.buildDirectory.dir("install/intelligence"))
-    into(layout.projectDirectory.dir(".local/intelligence"))
+    from(project(":cli").layout.buildDirectory.dir("install/$distributionName"))
+    into(layout.projectDirectory.dir(".local/$distributionName"))
 }
 
 tasks.register("verifyKotlinOnlyDevelopmentCli") {
@@ -19,7 +21,7 @@ tasks.register("verifyKotlinOnlyDevelopmentCli") {
     dependsOn("installDevelopmentCli")
 
     doLast {
-        val installRoot = layout.projectDirectory.dir(".local/intelligence").asFile.toPath()
+        val installRoot = layout.projectDirectory.dir(".local/$distributionName").asFile.toPath()
         val installedFiles =
             java.nio.file.Files.walk(installRoot).use { paths ->
                 paths
@@ -33,8 +35,8 @@ tasks.register("verifyKotlinOnlyDevelopmentCli") {
                 .map { it.toString() }
                 .map { it.replace('\\', '/') }
                 .filterNot { relative ->
-                    relative == "bin/intelligence" ||
-                        relative == "bin/intelligence.bat" ||
+                    relative == "bin/$distributionName" ||
+                        relative == "bin/$distributionName.bat" ||
                         relative.startsWith("lib/") && relative.endsWith(".jar")
                 }
                 .sorted()

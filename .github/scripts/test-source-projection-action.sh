@@ -1,15 +1,10 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2016 # Workflow expressions are intentional contract literals.
 set -euo pipefail
 
 die() {
   printf 'error: %s\n' "$*" >&2
   exit 1
-}
-
-resolve_repo_root() {
-  local script_dir
-  script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-  cd -- "${script_dir}/../.." && pwd
 }
 
 require_contains() {
@@ -25,29 +20,62 @@ output_value() {
   sed -n "s/^${name}=//p" "$file_path" | tail -1
 }
 
-repo_root="$(resolve_repo_root)"
+property_value() {
+  local name="$1"
+  local file_path="$2"
+  local value
+  value="$(sed -n "s/^${name}=//p" "$file_path")"
+  [[ -n "$value" && "$value" != *$'\n'* ]] || die "${file_path} must define ${name} exactly once"
+  printf '%s\n' "$value"
+}
+
+repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 action_manifest="${repo_root}/action.yml"
 action_runner="${repo_root}/.github/actions/project/run.sh"
-development_cli="${repo_root}/.local/intelligence/bin/intelligence"
+identity_file="${repo_root}/gradle.properties"
+fixture_root="${repo_root}/.github/fixtures/source-projection"
 
-[[ -f "$action_manifest" ]] || die "Source projection action manifest is missing: ${action_manifest}"
-[[ -f "$action_runner" ]] || die "Source projection action runner is missing: ${action_runner}"
-[[ -x "$action_runner" ]] || die "Source projection action runner must be executable: ${action_runner}"
-[[ -x "$development_cli" ]] || die "Development CLI is missing; run ./gradlew installDevelopmentCli"
+[[ -f "$identity_file" ]] || die "distribution identity file is missing: ${identity_file}"
+distribution_name="$(property_value distributionName "$identity_file")"
+development_cli="${repo_root}/.local/${distribution_name}/bin/${distribution_name}"
+
+[[ -f "$action_manifest" ]] || die "action manifest is missing: ${action_manifest}"
+[[ -f "$action_runner" ]] || die "action runner is missing: ${action_runner}"
+[[ -x "$action_runner" ]] || die "action runner must be executable: ${action_runner}"
+[[ -x "$development_cli" ]] || die "development CLI is missing; run ./gradlew installDevelopmentCli"
+[[ -f "${fixture_root}/source/adaptable.marketplace.json" ]] || die "action fixture is missing"
 
 ruby -e 'require "yaml"; YAML.safe_load(File.read(ARGV.fetch(0)), aliases: true)' "$action_manifest"
+require_contains "$action_manifest" "name: Source Projection" "Action metadata must use a repository-neutral name"
 require_contains "$action_manifest" "using: composite" "Action must use the auditable composite runtime"
-require_contains "$action_manifest" "uses: actions/setup-java@v5" "Action must provision the released JVM runtime"
-require_contains "$action_manifest" "uses: actions/setup-python@v6" "Action must provision the release verifier runtime"
+require_contains "$action_manifest" "uses: actions/setup-java@" "Action must provision the released JVM runtime"
+require_contains "$action_manifest" "uses: actions/setup-python@" "Action must provision the release verifier runtime"
+require_contains "$action_manifest" 'ACTION_REPOSITORY: ${{ github.action_repository }}' "Action must derive its release repository"
+require_contains "$action_manifest" 'ACTION_API_URL: ${{ github.api_url }}' "Action must derive its GitHub API"
+require_contains "$action_manifest" 'ACTION_SERVER_URL: ${{ github.server_url }}' "Action must derive its GitHub server"
+require_contains "$action_manifest" "token:" "Action must expose authentication for private release assets"
 require_contains "$action_manifest" "harness:" "Action must expose the target harness"
 require_contains "$action_manifest" "source:" "Action must expose the provider-neutral source"
 require_contains "$action_manifest" "output:" "Action must expose the generated output path"
 require_contains "$action_manifest" "version:" "Action must expose release selection"
 require_contains "$action_manifest" "projection-path:" "Action must return the normalized projection path"
 require_contains "$action_manifest" "files:" "Action must return the generated file count"
+require_contains "$action_runner" 'distributionName' "Action runner must read the centralized distribution identity"
+require_contains "$action_runner" 'ACTION_REPOSITORY' "Action runner must read the repository context"
+require_contains "$action_runner" 'ACTION_API_URL' "Action runner must read the API context"
+require_contains "$action_runner" 'ACTION_SERVER_URL' "Action runner must read the server context"
 
-proof_root="$(mktemp -d "${TMPDIR:-/tmp}/intelligence-action-contract.XXXXXX")"
-trap 'rm -rf "$proof_root"' EXIT
+proof_root="$(mktemp -d "${TMPDIR:-/tmp}/source-projection-action-contract.XXXXXX")"
+server_pid=""
+cleanup() {
+  if [[ -n "$server_pid" ]]; then
+    kill "$server_pid" >/dev/null 2>&1 || true
+    wait "$server_pid" 2>/dev/null || true
+  fi
+  rm -rf "$proof_root"
+}
+trap cleanup EXIT
+mkdir -p "$proof_root/runner-temp"
 
 run_projection() {
   local harness="$1"
@@ -58,15 +86,17 @@ run_projection() {
   GITHUB_WORKSPACE="$repo_root" \
   GITHUB_OUTPUT="$github_output" \
   RUNNER_TEMP="$proof_root/runner-temp" \
-  INPUT_SOURCE="$repo_root" \
+  ACTION_API_URL="https://github.enterprise.example/api/v3" \
+  ACTION_REPOSITORY="enterprise/source-projection" \
+  ACTION_SERVER_URL="https://github.enterprise.example" \
+  INPUT_SOURCE="$fixture_root" \
   INPUT_HARNESS="$harness" \
   INPUT_OUTPUT="$output" \
+  INPUT_TOKEN="" \
   INPUT_VERSION="latest" \
-  INTELLIGENCE_ACTION_CLI="$development_cli" \
+  SOURCE_PROJECTION_CLI="$development_cli" \
     "$action_runner"
 }
-
-mkdir -p "$proof_root/runner-temp"
 
 codex_output="$proof_root/codex"
 codex_github_output="$proof_root/codex.outputs"
@@ -90,8 +120,109 @@ default_github_output="$proof_root/default.outputs"
 run_projection "codex" "" "$default_github_output"
 default_output="$(output_value "$default_github_output" projection-path)"
 runner_temp="$(cd -- "$proof_root/runner-temp" && pwd -P)"
-[[ "$default_output" == "${runner_temp}"/intelligence-projection.*/payload ]] || die "Default output must be a fresh directory under RUNNER_TEMP: ${default_output}"
+[[ "$default_output" == "${runner_temp}"/"${distribution_name}"-projection.*/payload ]] || die "Default output must be a fresh directory under RUNNER_TEMP: ${default_output}"
 [[ -f "$default_output/.agents/plugins/marketplace.json" ]] || die "Default projection output is missing"
+
+release_dir="$proof_root/release"
+mkdir -p "$release_dir"
+release_asset="${distribution_name}-v0.0.0.tar.gz"
+COPYFILE_DISABLE=1 tar -C "${repo_root}/.local" -czf "${release_dir}/${release_asset}" "$distribution_name"
+if command -v sha256sum >/dev/null 2>&1; then
+  release_sha="$(sha256sum "${release_dir}/${release_asset}" | awk '{ print $1 }')"
+else
+  release_sha="$(shasum -a 256 "${release_dir}/${release_asset}" | awk '{ print $1 }')"
+fi
+printf '%s  %s\n' "$release_sha" "$release_asset" >"${release_dir}/SHA256SUMS"
+
+port_file="$proof_root/mock-api.port"
+python3 - "$release_dir" "$release_asset" "$port_file" <<'PY' &
+import json
+import sys
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+release_dir = Path(sys.argv[1])
+release_asset = sys.argv[2]
+port_file = Path(sys.argv[3])
+repository_path = "/api/v3/repos/enterprise/source-projection/releases/"
+
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.headers.get("Authorization") != "Bearer fixture-token":
+            self.send_error(401)
+            return
+        if self.path == repository_path + "latest":
+            self.send_json({"tag_name": "v0.0.0"})
+            return
+        if self.path == repository_path + "tags/v0.0.0":
+            base = f"http://127.0.0.1:{self.server.server_port}"
+            self.send_json({
+                "assets": [
+                    {"name": release_asset, "url": f"{base}/assets/{release_asset}"},
+                    {"name": "SHA256SUMS", "url": f"{base}/assets/SHA256SUMS"},
+                ]
+            })
+            return
+        if self.path.startswith("/assets/"):
+            asset = release_dir / self.path.removeprefix("/assets/")
+            if not asset.is_file() or asset.parent != release_dir:
+                self.send_error(404)
+                return
+            payload = asset.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+            return
+        self.send_error(404)
+
+    def send_json(self, value):
+        payload = json.dumps(value).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def log_message(self, *_):
+        pass
+
+
+server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+port_file.write_text(str(server.server_port), encoding="utf-8")
+server.serve_forever()
+PY
+server_pid="$!"
+for _ in {1..50}; do
+  [[ -s "$port_file" ]] && break
+  sleep 0.1
+done
+[[ -s "$port_file" ]] || die "mock release API did not start"
+mock_port="$(cat "$port_file")"
+
+release_output="$proof_root/release-download"
+release_github_output="$proof_root/release-download.outputs"
+GITHUB_ACTION_PATH="$repo_root" \
+GITHUB_WORKSPACE="$repo_root" \
+GITHUB_OUTPUT="$release_github_output" \
+RUNNER_TEMP="$proof_root/runner-temp" \
+ACTION_API_URL="http://127.0.0.1:${mock_port}/api/v3" \
+ACTION_REPOSITORY="enterprise/source-projection" \
+ACTION_SERVER_URL="http://127.0.0.1:${mock_port}" \
+INPUT_SOURCE="$fixture_root" \
+INPUT_HARNESS="codex" \
+INPUT_OUTPUT="$release_output" \
+INPUT_TOKEN="fixture-token" \
+INPUT_VERSION="latest" \
+SOURCE_PROJECTION_CLI="" \
+  "$action_runner"
+[[ -f "$release_output/.agents/plugins/marketplace.json" ]] || die "Downloaded release did not project source"
+require_contains "$release_github_output" "version=v0.0.0" "Latest release must resolve to an exact tag"
+kill "$server_pid" >/dev/null 2>&1 || true
+wait "$server_pid" 2>/dev/null || true
+server_pid=""
 
 invalid_log="$proof_root/invalid-harness.log"
 if run_projection "cursor" "$proof_root/cursor" "$proof_root/cursor.outputs" >"$invalid_log" 2>&1; then
@@ -104,10 +235,15 @@ if GITHUB_ACTION_PATH="$repo_root" \
   GITHUB_WORKSPACE="$repo_root" \
   GITHUB_OUTPUT="$proof_root/invalid-version.outputs" \
   RUNNER_TEMP="$proof_root/runner-temp" \
-  INPUT_SOURCE="$repo_root" \
+  ACTION_API_URL="https://github.enterprise.example/api/v3" \
+  ACTION_REPOSITORY="enterprise/source-projection" \
+  ACTION_SERVER_URL="https://github.enterprise.example" \
+  INPUT_SOURCE="$fixture_root" \
   INPUT_HARNESS="codex" \
   INPUT_OUTPUT="$proof_root/invalid-version" \
+  INPUT_TOKEN="" \
   INPUT_VERSION="main" \
+  SOURCE_PROJECTION_CLI="" \
     "$action_runner" >"$invalid_version_log" 2>&1
 then
   die "Action accepted a non-release version"

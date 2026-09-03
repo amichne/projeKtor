@@ -1,105 +1,61 @@
-# Intelligence
+# Source Projection Action
 
-Intelligence is a Kotlin/JVM projector for agent tooling. It reads one
-provider-neutral marketplace source tree and converts it into the native layout
-expected by one target harness.
-
-The initial product boundary is deliberately narrow:
+This repository publishes one composite GitHub Action. It validates a
+provider-neutral agent-tooling source tree and projects it into the native
+layout for either Codex or GitHub Copilot.
 
 ```text
-provider-neutral source -> validate -> project -> validate -> harness payload
+source tree -> validate -> project -> validate -> harness payload
 ```
 
-It does not install, register, publish, discover, select, cache consumer state,
-modify harness configuration, or open a TUI.
+The action does not install, register, commit, or publish the generated
+payload.
 
-## Project a Marketplace
+## Usage
 
-Use one explicit source, harness, and output directory.
-
-```sh
-intelligence project \
-  --source /path/to/slopsentral \
-  --harness codex \
-  --out /tmp/slopsentral-codex
-
-intelligence project \
-  --source /path/to/slopsentral \
-  --harness github-copilot \
-  --out /tmp/slopsentral-copilot
-```
-
-The command projects the marketplace, plugins, skills, agents, instructions,
-hooks, and their supporting material. It validates the provider-neutral source
-before conversion and validates the generated harness payload before reporting
-success.
-
-Stdout is compact TOON suitable for agents and scripts:
-
-```text
-status: projected
-harness: codex
-files: 42
-source: "/path/to/slopsentral"
-output: "/tmp/slopsentral-codex"
-```
-
-## Project in GitHub Actions
-
-The repository also exposes a composite action that acquires a verified stable
-release and projects one checked-out source tree. Its default output is a fresh
-directory under `RUNNER_TEMP`.
+Pin the action itself to a full commit SHA and select an exact projector
+release in production workflows.
 
 ```yaml
 - name: Check out source
-  uses: actions/checkout@v5
+  uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-- name: Project for Codex
+- name: Project source
   id: projection
-  uses: amichne/intelligence@main
+  uses: OWNER/REPOSITORY@FULL_COMMIT_SHA
   with:
     source: .
     harness: codex
-    version: v0.2.7
+    version: v1.2.3
 
-- name: Upload projection
-  uses: actions/upload-artifact@v4
-  with:
-    name: codex-projection
-    path: ${{ steps.projection.outputs.projection-path }}
+- name: Consume projection
+  run: find "${{ steps.projection.outputs.projection-path }}" -type f
 ```
 
-Use `github-copilot` for the other harness. The action returns
-`projection-path`, `files`, and the resolved `version`. Pin an immutable action
-ref and an exact projector version in production workflows.
+`harness` accepts `codex` or `github-copilot`. The outputs are
+`projection-path`, `files`, and `version`. For release assets in a private
+action repository, pass a `token` with read access to that repository.
 
-The action only projects. Uploading, committing, installing, or registering the
-generated payload remains a separate, explicit workflow decision.
+The action discovers its release repository and API endpoint from the GitHub
+runtime. No repository URL is compiled into the action, so the same commit can
+run from a renamed repository or a GitHub Enterprise Server mirror.
 
-## Repository Shape
+## Rename and development
 
-- `source/adaptable.marketplace.json` is the provider-neutral marketplace
-  entry point used by repository fixtures.
-- `/Users/amichne/code/slopsentral/source/` is the canonical local source for
-  reusable personal tooling.
-- `schemas/core/` owns provider-neutral primitive contracts.
-- `schemas/adapters/` and `schemas/marketplace/` own generated harness
-  contracts.
-- `cli/` owns validation and projection.
-- `docs/` and `zensical.toml` own the documentation site.
+`distributionName` in `gradle.properties` is the single source of truth for
+the CLI launcher, archive, development install, temporary paths, and release
+asset name. The Kotlin package is an implementation detail and does not define
+the published identity.
 
-## Development
-
-Run the Kotlin and distribution gates after changing the projector.
+Run the full local gate with Java 21 or newer:
 
 ```sh
-./gradlew :cli:test installDevelopmentCli verifyKotlinOnlyDevelopmentCli
-.local/intelligence/bin/intelligence --help
-zensical build --clean
-git diff --check
+./gradlew check installDevelopmentCli --no-daemon
+.github/scripts/test-distribution-identity.sh
+.github/scripts/test-source-projection-action.sh
+.github/scripts/test-release-workflow-contract.sh
+.github/scripts/test-repository-boundary.sh
 ```
 
-Reusable marketplace content belongs in
-[amichne/slopsentral](https://github.com/amichne/slopsentral). This repository
-owns the conversion engine and its schemas, not the personal marketplace
-source.
+Release tags use `vX.Y.Z`. Each release contains exactly one platform-neutral
+JVM archive plus `SHA256SUMS`.

@@ -1,5 +1,6 @@
 package intelligence.cli.command
 
+import intelligence.cli.BuildInfo
 import intelligence.cli.io.FileSystem
 import intelligence.cli.marketplace.MarketplaceFailure
 import intelligence.cli.marketplace.MarketplaceProjector
@@ -10,12 +11,12 @@ import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.InvalidPathException
 import java.nio.file.Path
-import com.github.ajalt.clikt.core.CliktCommand
+import com.github.ajalt.clikt.core.CoreCliktCommand
 import com.github.ajalt.clikt.core.Context
 import com.github.ajalt.clikt.core.ProgramResult
 import com.github.ajalt.clikt.parameters.options.option
 
-internal class ProjectCommand : CliktCommand(name = "project") {
+internal class ProjectCommand : CoreCliktCommand(name = "project") {
     private val sourceRaw by option(
         "--source",
         help = "Provider-neutral marketplace repository to read.",
@@ -62,7 +63,7 @@ internal class ProjectCommand : CliktCommand(name = "project") {
             val outputParent = normalizedOutput.parent
                 ?: reject("OUTPUT_UNAVAILABLE", "output directory must have a parent")
             Files.createDirectories(outputParent)
-            val stagingOutput = Files.createTempDirectory(outputParent, ".intelligence-project-")
+            val stagingOutput = Files.createTempDirectory(outputParent, ".${BuildInfo.NAME}-project-")
             try {
                 MarketplaceProjector(output = {}).materialize(
                     repoRoot = normalizedSource,
@@ -113,7 +114,7 @@ internal class ProjectCommand : CliktCommand(name = "project") {
                 appendLine("error:")
                 appendLine("  code: $code")
                 appendLine("  message: ${quoteToon(message)}")
-                append("  help: ${quoteToon("intelligence project --source <directory> --harness <codex|github-copilot> --out <directory>")}")
+                append("  help: ${quoteToon("${BuildInfo.NAME} project --source <directory> --harness <codex|github-copilot> --out <directory>")}")
             },
             trailingNewline = false,
         )
