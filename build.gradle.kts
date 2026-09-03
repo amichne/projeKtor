@@ -6,7 +6,7 @@ val distributionName = providers.gradleProperty("distributionName").get()
 
 tasks.register<Sync>("installDevelopmentCli") {
     group = "application"
-    description = "Update the repository-local projector CLI from the Kotlin build output."
+    description = "Update the repository-local projeKtor CLI from the Kotlin build output."
 
     dependsOn(":cli:installDist")
 

@@ -14,6 +14,7 @@ require_literal() {
 }
 
 require_literal cli/build.gradle.kts 'kotlin("jvm") version "2.4.10"'
+require_literal cli/build.gradle.kts 'id("org.graalvm.buildtools.native") version "1.1.9"'
 require_literal cli/build.gradle.kts 'com.github.ajalt.clikt:clikt-core:5.1.0'
 require_literal cli/build.gradle.kts 'org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0'
 if grep -Fq -- 'mordant' cli/build.gradle.kts; then
@@ -40,6 +41,7 @@ for workflow in .github/workflows/ci.yml .github/workflows/release.yml; do
   require_literal "$workflow" 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1'
   require_literal "$workflow" 'actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0'
   require_literal "$workflow" 'actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0'
+  require_literal "$workflow" 'graalvm/setup-graalvm@bef4b0e916c7dd079bf60fb95d49139f67e32c5f # v1.5.3'
   require_literal "$workflow" 'gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0'
 done
 

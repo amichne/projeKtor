@@ -8,15 +8,20 @@ die() {
 
 usage() {
   cat >&2 <<'USAGE'
-Usage: .github/scripts/verify-release-assets.sh --release-dir <dir> --tag <vX.Y.Z>
+Usage: .github/scripts/verify-release-assets.sh \
+  --release-dir <dir> --tag <vX.Y.Z> [--asset <archive>]
 
-Verify a downloaded projector release directory. The directory must contain
-one platform-neutral Kotlin/JVM CLI archive and SHA256SUMS.
+Without --asset, verify the complete release: one platform-neutral Kotlin/JVM
+archive, Linux x64 and macOS arm64 native archives, and SHA256SUMS. With
+--asset, verify exactly one downloaded archive against a closed checksum
+manifest; this mode lets the Action use a native asset or an older JVM-only
+release without weakening complete-release publication checks.
 USAGE
 }
 
 release_dir=""
 tag=""
+selected_asset=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -30,6 +35,11 @@ while [[ $# -gt 0 ]]; do
       tag="$2"; shift 2 ;;
     --tag=*)
       tag="${1#--tag=}"; shift ;;
+    --asset)
+      [[ $# -ge 2 ]] || die "Missing value for --asset"
+      selected_asset="$2"; shift 2 ;;
+    --asset=*)
+      selected_asset="${1#--asset=}"; shift ;;
     --help|-h)
       usage; exit 0 ;;
     *)
@@ -42,6 +52,8 @@ done
 [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "--tag must match vX.Y.Z: $tag"
 [[ -d "$release_dir" ]] || die "Release directory not found: $release_dir"
 [[ -f "${release_dir}/SHA256SUMS" ]] || die "SHA256SUMS not found in $release_dir"
+[[ "$selected_asset" != */* && "$selected_asset" != *\\* ]] || \
+  die "--asset must be an archive name, not a path: $selected_asset"
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 distribution_name="$(sed -n 's/^distributionName=//p' "${repo_root}/gradle.properties")"
@@ -50,8 +62,9 @@ distribution_name="$(sed -n 's/^distributionName=//p' "${repo_root}/gradle.prope
 [[ "$distribution_name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || \
   die "distributionName contains unsupported characters: ${distribution_name}"
 
-python3 - "$release_dir" "$tag" "$distribution_name" <<'PY'
+python3 - "$release_dir" "$tag" "$distribution_name" "$selected_asset" <<'PY'
 import hashlib
+import re
 import tarfile
 import sys
 import zipfile
@@ -60,9 +73,16 @@ from pathlib import Path
 release_dir = Path(sys.argv[1])
 tag = sys.argv[2]
 distribution_name = sys.argv[3]
+selected_asset = sys.argv[4]
 
-expected_assets = {f"{distribution_name}-{tag}.tar.gz"}
-required_members = {
+native_targets = ("linux-x64", "macos-arm64")
+portable_asset = f"{distribution_name}-{tag}.tar.gz"
+native_assets = {
+    f"{distribution_name}-{tag}-{target}.tar.gz"
+    for target in native_targets
+}
+expected_assets = {portable_asset, *native_assets}
+portable_required_members = {
     f"{distribution_name}/bin/{distribution_name}",
     f"{distribution_name}/bin/{distribution_name}.bat",
 }
@@ -79,11 +99,18 @@ actual_assets = {
     if path.is_file() and path.name.startswith(f"{distribution_name}-") and path.name.endswith(".tar.gz")
 }
 
-unexpected_assets = sorted(actual_assets - expected_assets)
+if selected_asset:
+    if selected_asset not in expected_assets:
+        fail(f"unsupported selected release asset: {selected_asset}")
+    required_assets = {selected_asset}
+else:
+    required_assets = expected_assets
+
+unexpected_assets = sorted(actual_assets - required_assets)
 if unexpected_assets:
     fail(f"unexpected release asset: {unexpected_assets}")
 
-missing_assets = sorted(expected_assets - actual_assets)
+missing_assets = sorted(required_assets - actual_assets)
 if missing_assets:
     fail(f"missing release asset: {missing_assets}")
 
@@ -96,15 +123,22 @@ for raw_line in (release_dir / "SHA256SUMS").read_text(encoding="utf-8").splitli
     if len(parts) != 2:
         fail(f"invalid SHA256SUMS line: {raw_line}")
     digest, asset_name = parts
+    if not re.fullmatch(r"[0-9a-fA-F]{64}", digest):
+        fail(f"invalid SHA-256 digest for {asset_name}: {digest}")
     if asset_name in sha_entries:
         fail(f"duplicate checksum entry for {asset_name}")
-    sha_entries[asset_name] = digest
+    sha_entries[asset_name] = digest.lower()
 
 unexpected_checksums = sorted(set(sha_entries) - expected_assets)
 if unexpected_checksums:
     fail(f"unexpected checksum entry: {unexpected_checksums}")
 
-for asset_name in sorted(expected_assets):
+if not selected_asset:
+    missing_checksums = sorted(expected_assets - set(sha_entries))
+    if missing_checksums:
+        fail(f"missing checksum entry: {missing_checksums}")
+
+for asset_name in sorted(required_assets):
     asset_path = release_dir / asset_name
     expected_digest = sha_entries.get(asset_name)
     if expected_digest is None:
@@ -124,37 +158,61 @@ for asset_name in sorted(expected_assets):
         if unsafe_members:
             fail(f"{asset_name} contains unsafe archive member: {unsafe_members}")
 
-        regular_files = {member.name for member in members if member.isfile()}
-        unexpected_members = sorted(
-            name
-            for name in regular_files
-            if name not in required_members and not (name.startswith(f"{distribution_name}/lib/") and name.endswith(".jar"))
-        )
-        if unexpected_members:
-            fail(f"{asset_name} contains unexpected runtime member: {unexpected_members}")
+        regular_files = {member.name.removesuffix("/") for member in members if member.isfile()}
+        if asset_name == portable_asset:
+            unexpected_members = sorted(
+                name
+                for name in regular_files
+                if name not in portable_required_members
+                and not (name.startswith(f"{distribution_name}/lib/") and name.endswith(".jar"))
+            )
+            if unexpected_members:
+                fail(f"{asset_name} contains unexpected runtime member: {unexpected_members}")
 
-        jar_members = sorted(
-            name
-            for name in regular_files
-            if name.startswith(f"{distribution_name}/lib/") and name.endswith(".jar")
-        )
-        if not jar_members:
-            fail(f"{asset_name} is missing runtime JARs under {distribution_name}/lib/")
+            missing_members = sorted(portable_required_members - names)
+            if missing_members:
+                fail(f"{asset_name} is missing archive member: {missing_members}")
 
-        for jar_member in jar_members:
-            extracted = archive.extractfile(jar_member)
-            if extracted is None:
-                fail(f"{asset_name} could not read runtime JAR {jar_member}")
-            with zipfile.ZipFile(extracted) as jar:
-                forbidden_entries = sorted(
-                    entry for entry in jar.namelist() if entry.lower().endswith(forbidden_runtime_suffixes)
+            launcher = next(
+                member
+                for member in members
+                if member.name.removesuffix("/") == f"{distribution_name}/bin/{distribution_name}"
+            )
+            if launcher.mode & 0o111 == 0:
+                fail(f"{asset_name} JVM launcher is not executable")
+
+            jar_members = sorted(
+                name
+                for name in regular_files
+                if name.startswith(f"{distribution_name}/lib/") and name.endswith(".jar")
+            )
+            if not jar_members:
+                fail(f"{asset_name} is missing runtime JARs under {distribution_name}/lib/")
+
+            for jar_member in jar_members:
+                extracted = archive.extractfile(jar_member)
+                if extracted is None:
+                    fail(f"{asset_name} could not read runtime JAR {jar_member}")
+                with zipfile.ZipFile(extracted) as jar:
+                    forbidden_entries = sorted(
+                        entry for entry in jar.namelist() if entry.lower().endswith(forbidden_runtime_suffixes)
+                    )
+                if forbidden_entries:
+                    fail(f"{asset_name} runtime JAR {jar_member} contains forbidden entries: {forbidden_entries}")
+        else:
+            if regular_files != {distribution_name}:
+                fail(
+                    f"{asset_name} must contain exactly one root executable named "
+                    f"{distribution_name}; got {sorted(regular_files)}"
                 )
-            if forbidden_entries:
-                fail(f"{asset_name} runtime JAR {jar_member} contains forbidden entries: {forbidden_entries}")
+            native_executable = next(
+                member
+                for member in members
+                if member.isfile() and member.name.removesuffix("/") == distribution_name
+            )
+            if native_executable.mode & 0o111 == 0:
+                fail(f"{asset_name} native executable is not executable")
 
-    missing_members = sorted(required_members - names)
-    if missing_members:
-        fail(f"{asset_name} is missing archive member: {missing_members}")
-
-print(f"Verified projector release assets for {tag} in {release_dir}")
+mode = f"selected asset {selected_asset}" if selected_asset else "complete release"
+print(f"Verified {distribution_name} {mode} for {tag} in {release_dir}")
 PY

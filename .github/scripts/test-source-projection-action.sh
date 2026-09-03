@@ -126,16 +126,32 @@ runner_temp="$(cd -- "$proof_root/runner-temp" && pwd -P)"
 release_dir="$proof_root/release"
 mkdir -p "$release_dir"
 release_asset="${distribution_name}-v0.0.0.tar.gz"
+native_asset="${distribution_name}-v0.0.0-linux-x64.tar.gz"
 COPYFILE_DISABLE=1 tar -C "${repo_root}/.local" -czf "${release_dir}/${release_asset}" "$distribution_name"
+native_bundle="${proof_root}/native-bundle"
+mkdir -p "$native_bundle"
+printf '%s\n' \
+  '#!/usr/bin/env bash' \
+  'set -euo pipefail' \
+  'printf "native\n" > "$NATIVE_EXECUTION_MARKER"' \
+  'exec "$NATIVE_FIXTURE_CLI" "$@"' \
+  > "${native_bundle}/${distribution_name}"
+chmod 0755 "${native_bundle}/${distribution_name}"
+COPYFILE_DISABLE=1 tar -C "$native_bundle" -czf "${release_dir}/${native_asset}" "$distribution_name"
 if command -v sha256sum >/dev/null 2>&1; then
   release_sha="$(sha256sum "${release_dir}/${release_asset}" | awk '{ print $1 }')"
+  native_sha="$(sha256sum "${release_dir}/${native_asset}" | awk '{ print $1 }')"
 else
   release_sha="$(shasum -a 256 "${release_dir}/${release_asset}" | awk '{ print $1 }')"
+  native_sha="$(shasum -a 256 "${release_dir}/${native_asset}" | awk '{ print $1 }')"
 fi
-printf '%s  %s\n' "$release_sha" "$release_asset" >"${release_dir}/SHA256SUMS"
+printf '%s  %s\n%s  %s\n' \
+  "$release_sha" "$release_asset" \
+  "$native_sha" "$native_asset" \
+  >"${release_dir}/SHA256SUMS"
 
 port_file="$proof_root/mock-api.port"
-python3 - "$release_dir" "$release_asset" "$port_file" <<'PY' &
+python3 - "$release_dir" "$release_asset" "$native_asset" "$port_file" <<'PY' &
 import json
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -143,7 +159,8 @@ from pathlib import Path
 
 release_dir = Path(sys.argv[1])
 release_asset = sys.argv[2]
-port_file = Path(sys.argv[3])
+native_asset = sys.argv[3]
+port_file = Path(sys.argv[4])
 repository_path = "/api/v3/repos/enterprise/source-projection/releases/"
 
 
@@ -160,6 +177,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({
                 "assets": [
                     {"name": release_asset, "url": f"{base}/assets/{release_asset}"},
+                    {"name": native_asset, "url": f"{base}/assets/{native_asset}"},
                     {"name": "SHA256SUMS", "url": f"{base}/assets/SHA256SUMS"},
                 ]
             })
@@ -204,10 +222,13 @@ mock_port="$(cat "$port_file")"
 
 release_output="$proof_root/release-download"
 release_github_output="$proof_root/release-download.outputs"
+native_marker="$proof_root/native-executed"
 GITHUB_ACTION_PATH="$repo_root" \
 GITHUB_WORKSPACE="$repo_root" \
 GITHUB_OUTPUT="$release_github_output" \
 RUNNER_TEMP="$proof_root/runner-temp" \
+RUNNER_OS="Linux" \
+RUNNER_ARCH="X64" \
 ACTION_API_URL="http://127.0.0.1:${mock_port}/api/v3" \
 ACTION_REPOSITORY="enterprise/source-projection" \
 ACTION_SERVER_URL="http://127.0.0.1:${mock_port}" \
@@ -216,10 +237,38 @@ INPUT_HARNESS="codex" \
 INPUT_OUTPUT="$release_output" \
 INPUT_TOKEN="fixture-token" \
 INPUT_VERSION="latest" \
+NATIVE_EXECUTION_MARKER="$native_marker" \
+NATIVE_FIXTURE_CLI="$development_cli" \
 SOURCE_PROJECTION_CLI="" \
   "$action_runner"
 [[ -f "$release_output/.agents/plugins/marketplace.json" ]] || die "Downloaded release did not project source"
+[[ -f "$native_marker" ]] || die "Linux x64 runner did not prefer the native release asset"
 require_contains "$release_github_output" "version=v0.0.0" "Latest release must resolve to an exact tag"
+
+rm -f "$native_marker"
+fallback_output="$proof_root/release-fallback"
+fallback_github_output="$proof_root/release-fallback.outputs"
+GITHUB_ACTION_PATH="$repo_root" \
+GITHUB_WORKSPACE="$repo_root" \
+GITHUB_OUTPUT="$fallback_github_output" \
+RUNNER_TEMP="$proof_root/runner-temp" \
+RUNNER_OS="Windows" \
+RUNNER_ARCH="X64" \
+ACTION_API_URL="http://127.0.0.1:${mock_port}/api/v3" \
+ACTION_REPOSITORY="enterprise/source-projection" \
+ACTION_SERVER_URL="http://127.0.0.1:${mock_port}" \
+INPUT_SOURCE="$fixture_root" \
+INPUT_HARNESS="github-copilot" \
+INPUT_OUTPUT="$fallback_output" \
+INPUT_TOKEN="fixture-token" \
+INPUT_VERSION="v0.0.0" \
+NATIVE_EXECUTION_MARKER="$native_marker" \
+NATIVE_FIXTURE_CLI="$development_cli" \
+SOURCE_PROJECTION_CLI="" \
+  "$action_runner"
+[[ -f "$fallback_output/.github/plugin/marketplace.json" ]] || die "JVM fallback did not project source"
+[[ ! -e "$native_marker" ]] || die "unsupported runner unexpectedly executed a native release asset"
+require_contains "$fallback_github_output" "version=v0.0.0" "JVM fallback must retain the selected tag"
 kill "$server_pid" >/dev/null 2>&1 || true
 wait "$server_pid" 2>/dev/null || true
 server_pid=""

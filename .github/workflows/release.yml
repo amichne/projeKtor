@@ -80,7 +80,7 @@ jobs:
           printf 'tag=%s\n' "$tag" >> "$GITHUB_OUTPUT"
 
   build:
-    name: Build verified release assets
+    name: Build verified portable release asset
     needs: prepare
     runs-on: ubuntu-latest
     steps:
@@ -110,6 +110,7 @@ jobs:
           .github/scripts/test-dependency-versions.sh
           .github/scripts/test-distribution-identity.sh
           .github/scripts/test-schema-contracts.sh
+          .github/scripts/test-native-delivery.sh
           .github/scripts/test-release-asset-verifier.sh
           .github/scripts/test-release-workflow-contract.sh
           .github/scripts/test-pages-site.sh
@@ -128,7 +129,10 @@ jobs:
           asset="${distribution_name}-${RELEASE_TAG}.tar.gz"
           cp "cli/build/distributions/${distribution_name}.tar.gz" "dist/${asset}"
           (cd dist && sha256sum "$asset" > SHA256SUMS)
-          .github/scripts/verify-release-assets.sh --release-dir dist --tag "$RELEASE_TAG"
+          .github/scripts/verify-release-assets.sh \
+            --release-dir dist \
+            --tag "$RELEASE_TAG" \
+            --asset "$asset"
 
           smoke_root="$(mktemp -d "${RUNNER_TEMP}/projector-smoke.XXXXXX")"
           tar -xzf "dist/${asset}" -C "$smoke_root"
@@ -147,8 +151,85 @@ jobs:
       - name: Upload release assets
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: release-assets
-          path: dist
+          name: release-assets-jvm
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  native:
+    name: Build native CLI (${{ matrix.target }})
+    needs:
+      - prepare
+      - build
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            runner: ubuntu-24.04
+          - target: macos-arm64
+            runner: macos-15
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+
+      - name: Set up GraalVM
+        uses: graalvm/setup-graalvm@bef4b0e916c7dd079bf60fb95d49139f67e32c5f # v1.5.3
+        with:
+          java-version: "21"
+          distribution: graalvm
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+
+      - name: Compile, package, and exercise native CLI
+        env:
+          NATIVE_TARGET: ${{ matrix.target }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          started_at="$SECONDS"
+          distribution_name="$(sed -n 's/^distributionName=//p' gradle.properties)"
+          ./gradlew :cli:nativeCompile --no-daemon -PdistributionVersion="$RELEASE_TAG"
+          mkdir -p dist
+          .github/scripts/build-native-release-asset.sh \
+            --tag "$RELEASE_TAG" \
+            --target "$NATIVE_TARGET" \
+            --output-dir dist
+          asset="${distribution_name}-${RELEASE_TAG}-${NATIVE_TARGET}.tar.gz"
+          if command -v sha256sum >/dev/null 2>&1; then
+            (cd dist && sha256sum "$asset" > SHA256SUMS)
+          else
+            (cd dist && shasum -a 256 "$asset" > SHA256SUMS)
+          fi
+          .github/scripts/verify-release-assets.sh \
+            --release-dir dist \
+            --tag "$RELEASE_TAG" \
+            --asset "$asset"
+          smoke_root="$(mktemp -d "${RUNNER_TEMP}/projektor-native-smoke.XXXXXX")"
+          tar -xzf "dist/${asset}" -C "$smoke_root"
+          .github/scripts/test-native-executable.sh \
+            --executable "${smoke_root}/${distribution_name}" \
+            --tag "$RELEASE_TAG"
+          {
+            printf '### Native release · %s\n\n' "$NATIVE_TARGET"
+            printf -- '- Build and smoke test: %ss\n' "$((SECONDS - started_at))"
+            printf -- '- Archive bytes: %s\n' "$(wc -c < "dist/${asset}" | tr -d '[:space:]')"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload native release asset
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-assets-${{ matrix.target }}
+          path: dist/*.tar.gz
           if-no-files-found: error
 
   publish:
@@ -156,6 +237,8 @@ jobs:
     needs:
       - prepare
       - build
+      - native
+    if: always() && needs.prepare.result == 'success' && needs.build.result == 'success' && needs.native.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -173,8 +256,9 @@ jobs:
       - name: Download release assets
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: release-assets
+          pattern: release-assets-*
           path: dist
+          merge-multiple: true
 
       - name: Verify and publish release
         env:
@@ -183,6 +267,7 @@ jobs:
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           set -euo pipefail
+          (cd dist && sha256sum ./*.tar.gz > SHA256SUMS)
           .github/scripts/verify-release-assets.sh --release-dir dist --tag "$RELEASE_TAG"
           gh release upload "$RELEASE_TAG" dist/* --clobber
           run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

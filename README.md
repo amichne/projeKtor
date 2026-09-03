@@ -13,7 +13,7 @@ payload.
 
 ## Usage
 
-Pin the action itself to a full commit SHA and select an exact projector
+Pin the action itself to a full commit SHA and select an exact projeKtor
 release in production workflows.
 
 ```yaml
@@ -26,7 +26,7 @@ release in production workflows.
   with:
     source: .
     harness: codex
-    version: v1.2.3
+    version: v1.0.0
 
 - name: Consume projection
   run: find "${{ steps.projection.outputs.projection-path }}" -type f
@@ -39,6 +39,11 @@ action repository, pass a `token` with read access to that repository.
 The action discovers its release repository and API endpoint from the GitHub
 runtime. No repository URL is compiled into the action, so the same commit can
 run from a renamed repository or a GitHub Enterprise Server mirror.
+
+On standard GitHub-hosted Linux x64 and Apple Silicon macOS runners, the
+action prefers the release's GraalVM native executable. It falls back to the
+portable JVM archive for Windows, unsupported architectures, and older
+releases that predate native assets.
 
 ## JSON Schema and Pages
 
@@ -67,11 +72,17 @@ Run the full local gate with Java 21 or newer:
 ./gradlew check installDevelopmentCli --no-daemon
 .github/scripts/test-distribution-identity.sh
 .github/scripts/test-schema-contracts.sh
+.github/scripts/test-native-delivery.sh
 .github/scripts/test-source-projection-action.sh
+.github/scripts/test-release-asset-verifier.sh
 .github/scripts/test-release-workflow-contract.sh
 .github/scripts/test-pages-site.sh
 .github/scripts/test-repository-boundary.sh
 ```
 
-Release tags use `vX.Y.Z`. Each release contains exactly one platform-neutral
-JVM archive named `projeKtor-vX.Y.Z.tar.gz` plus `SHA256SUMS`.
+Release tags use `vX.Y.Z`. Native-enabled releases contain exactly these
+archives plus `SHA256SUMS`:
+
+- `projeKtor-vX.Y.Z.tar.gz` — portable JVM fallback
+- `projeKtor-vX.Y.Z-linux-x64.tar.gz` — GitHub-hosted Linux
+- `projeKtor-vX.Y.Z-macos-arm64.tar.gz` — Apple Silicon macOS

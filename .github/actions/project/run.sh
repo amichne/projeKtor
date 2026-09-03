@@ -8,6 +8,7 @@ die() {
 
 download_root=""
 runtime_root=""
+downloaded_cli=""
 
 cleanup() {
   local exit_code="$?"
@@ -138,36 +139,73 @@ PY
   printf '%s\n' "$resolved"
 }
 
+native_target_for_runner() {
+  case "${RUNNER_OS:-}:${RUNNER_ARCH:-}" in
+    Linux:X64) printf 'linux-x64\n' ;;
+    macOS:ARM64) printf 'macos-arm64\n' ;;
+    *) return 1 ;;
+  esac
+}
+
 download_cli() {
   local version="$1"
   local destination="$2"
-  local asset="${distribution_name}-${version}.tar.gz"
+  local portable_asset="${distribution_name}-${version}.tar.gz"
+  local native_target=""
+  local preferred_asset=""
+  local asset
   local asset_url
   local metadata
   local asset_urls
   local checksum_url
+
+  if native_target="$(native_target_for_runner)"; then
+    preferred_asset="${distribution_name}-${version}-${native_target}.tar.gz"
+  fi
+
   download_root="$(mktemp -d "${runner_temp_root}/${distribution_name}-download.XXXXXX")"
   metadata="${download_root}/release.json"
   release_metadata "tags/${version}" "$metadata"
 
-  asset_urls="$(python3 - "$metadata" "$asset" <<'PY'
+  asset_urls="$(python3 - "$metadata" "$preferred_asset" "$portable_asset" <<'PY'
 import json
 import sys
 
 with open(sys.argv[1], encoding="utf-8") as source:
     assets = json.load(source).get("assets", [])
-by_name = {asset.get("name"): asset.get("url") for asset in assets}
-for name in (sys.argv[2], "SHA256SUMS"):
-    url = by_name.get(name)
-    if not isinstance(url, str) or not url:
+if not isinstance(assets, list):
+    raise SystemExit("release assets must be a list")
+
+by_name = {}
+for asset in assets:
+    if not isinstance(asset, dict):
+        raise SystemExit("release contains malformed asset metadata")
+    name = asset.get("name")
+    url = asset.get("url")
+    if not isinstance(name, str) or not isinstance(url, str) or not name or not url:
+        raise SystemExit("release contains incomplete asset metadata")
+    if name in by_name:
+        raise SystemExit(f"release contains duplicate asset metadata: {name}")
+    by_name[name] = url
+
+preferred = sys.argv[2]
+portable = sys.argv[3]
+selected = preferred if preferred and preferred in by_name else portable
+for name in (selected, "SHA256SUMS"):
+    if name not in by_name:
         raise SystemExit(f"release is missing asset: {name}")
-    print(url)
+
+print(selected)
+print(by_name[selected])
+print(by_name["SHA256SUMS"])
 PY
 )"
-  asset_url="$(printf '%s\n' "$asset_urls" | sed -n '1p')"
-  checksum_url="$(printf '%s\n' "$asset_urls" | sed -n '2p')"
-  [[ -n "$asset_url" && -n "$checksum_url" ]] || die "release asset metadata is incomplete for ${version}"
-  [[ "$(printf '%s\n' "$asset_urls" | wc -l | tr -d '[:space:]')" -eq 2 ]] || \
+  asset="$(printf '%s\n' "$asset_urls" | sed -n '1p')"
+  asset_url="$(printf '%s\n' "$asset_urls" | sed -n '2p')"
+  checksum_url="$(printf '%s\n' "$asset_urls" | sed -n '3p')"
+  [[ -n "$asset" && -n "$asset_url" && -n "$checksum_url" ]] || \
+    die "release asset metadata is incomplete for ${version}"
+  [[ "$(printf '%s\n' "$asset_urls" | wc -l | tr -d '[:space:]')" -eq 3 ]] || \
     die "release asset metadata is ambiguous for ${version}"
 
   github_api_download "$asset_url" "${download_root}/${asset}" "application/octet-stream"
@@ -176,10 +214,16 @@ PY
 
   "${action_root}/.github/scripts/verify-release-assets.sh" \
     --release-dir "$download_root" \
-    --tag "$version"
+    --tag "$version" \
+    --asset "$asset"
 
   mkdir -p -- "$destination"
   tar -xzf "${download_root}/${asset}" -C "$destination"
+  if [[ "$asset" == "$portable_asset" ]]; then
+    downloaded_cli="${destination}/${distribution_name}/bin/${distribution_name}"
+  else
+    downloaded_cli="${destination}/${distribution_name}"
+  fi
   rm -rf -- "$download_root"
   download_root=""
 }
@@ -245,7 +289,7 @@ else
 
   runtime_root="$(mktemp -d "${runner_temp_root}/${distribution_name}-runtime.XXXXXX")"
   download_cli "$resolved_version" "$runtime_root"
-  cli="${runtime_root}/${distribution_name}/bin/${distribution_name}"
+  cli="$downloaded_cli"
   [[ -f "$cli" ]] || die "release launcher is missing: ${cli}"
   chmod +x "$cli"
   [[ -x "$cli" ]] || die "release launcher is not executable: ${cli}"
@@ -256,7 +300,7 @@ fi
   --harness "$harness" \
   --out "$output_path"
 
-[[ -d "$output_path" ]] || die "projector did not create the output directory: ${output_path}"
+[[ -d "$output_path" ]] || die "projeKtor did not create the output directory: ${output_path}"
 file_count="$(find "$output_path" -type f | wc -l | tr -d '[:space:]')"
 [[ "$file_count" =~ ^[0-9]+$ ]] || die "projected file count is not numeric: ${file_count}"
 reported_output_path="$(external_path "$output_path")"

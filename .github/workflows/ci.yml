@@ -46,6 +46,7 @@ jobs:
           .github/scripts/test-dependency-versions.sh
           .github/scripts/test-distribution-identity.sh
           .github/scripts/test-schema-contracts.sh
+          .github/scripts/test-native-delivery.sh
           .github/scripts/test-release-asset-verifier.sh
           .github/scripts/test-release-workflow-contract.sh
           .github/scripts/test-pages-site.sh
@@ -62,7 +63,76 @@ jobs:
           mkdir -p dist
           cp "cli/build/distributions/${distribution_name}.tar.gz" "dist/${distribution_name}-${version}.tar.gz"
           (cd dist && sha256sum "${distribution_name}-${version}.tar.gz" > SHA256SUMS)
-          .github/scripts/verify-release-assets.sh --release-dir dist --tag "$version"
+          .github/scripts/verify-release-assets.sh \
+            --release-dir dist \
+            --tag "$version" \
+            --asset "${distribution_name}-${version}.tar.gz"
+
+  native:
+    name: Verify native executable (${{ matrix.target }})
+    needs: validate
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            runner: ubuntu-24.04
+          - target: macos-arm64
+            runner: macos-15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up GraalVM
+        uses: graalvm/setup-graalvm@bef4b0e916c7dd079bf60fb95d49139f67e32c5f # v1.5.3
+        with:
+          java-version: "21"
+          distribution: graalvm
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+
+      - name: Compile, package, and exercise native CLI
+        env:
+          NATIVE_TARGET: ${{ matrix.target }}
+          RELEASE_TAG: v0.0.0
+        run: |
+          set -euo pipefail
+          started_at="$SECONDS"
+          distribution_name="$(sed -n 's/^distributionName=//p' gradle.properties)"
+          ./gradlew :cli:nativeCompile --no-daemon -PdistributionVersion="$RELEASE_TAG"
+          mkdir -p dist
+          .github/scripts/build-native-release-asset.sh \
+            --tag "$RELEASE_TAG" \
+            --target "$NATIVE_TARGET" \
+            --output-dir dist
+          asset="${distribution_name}-${RELEASE_TAG}-${NATIVE_TARGET}.tar.gz"
+          if command -v sha256sum >/dev/null 2>&1; then
+            (cd dist && sha256sum "$asset" > SHA256SUMS)
+          else
+            (cd dist && shasum -a 256 "$asset" > SHA256SUMS)
+          fi
+          .github/scripts/verify-release-assets.sh \
+            --release-dir dist \
+            --tag "$RELEASE_TAG" \
+            --asset "$asset"
+          smoke_root="$(mktemp -d "${RUNNER_TEMP}/projektor-native-smoke.XXXXXX")"
+          tar -xzf "dist/${asset}" -C "$smoke_root"
+          .github/scripts/test-native-executable.sh \
+            --executable "${smoke_root}/${distribution_name}" \
+            --tag "$RELEASE_TAG"
+          {
+            printf '### Native CLI · %s\n\n' "$NATIVE_TARGET"
+            printf -- '- Build and smoke test: %ss\n' "$((SECONDS - started_at))"
+            printf -- '- Archive bytes: %s\n' "$(wc -c < "dist/${asset}" | tr -d '[:space:]')"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   action:
     name: Action (${{ matrix.os }}, ${{ matrix.harness }})

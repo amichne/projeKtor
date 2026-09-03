@@ -1,6 +1,7 @@
 plugins {
     kotlin("jvm") version "2.4.10"
     application
+    id("org.graalvm.buildtools.native") version "1.1.9"
 }
 
 val distributionName = providers.gradleProperty("distributionName").get()
@@ -8,6 +9,16 @@ val distributionName = providers.gradleProperty("distributionName").get()
 application {
     mainClass.set("intelligence.cli.MainKt")
     applicationName = distributionName
+}
+
+graalvmNative {
+    binaries {
+        named("main") {
+            imageName.set(distributionName)
+            mainClass.set("intelligence.cli.MainKt")
+            buildArgs.addAll("-O2", "-march=compatibility", "--no-fallback")
+        }
+    }
 }
 
 val distributionVersion = providers.gradleProperty("distributionVersion")

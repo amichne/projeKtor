@@ -14,7 +14,7 @@ inputs:
     required: false
     default: ""
   version:
-    description: Projector release tag in vX.Y.Z form, or latest for the newest stable release.
+    description: projeKtor release tag in vX.Y.Z form, or latest for the newest stable release.
     required: false
     default: latest
   token:
@@ -30,7 +30,7 @@ outputs:
     description: Number of files in the validated projection.
     value: ${{ steps.project.outputs.files }}
   version:
-    description: Exact projector release tag used for projection.
+    description: Exact projeKtor release tag used for projection.
     value: ${{ steps.project.outputs.version }}
 
 runs:

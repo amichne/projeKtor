@@ -25,7 +25,7 @@ compute_sha256() {
   die "Neither sha256sum nor shasum is available"
 }
 
-write_asset() {
+write_portable_asset() {
   local release_dir="$1"
   local tag="$2"
   local asset_path="${release_dir}/${distribution_name}-${tag}.tar.gz"
@@ -39,6 +39,29 @@ write_asset() {
   jar --create --file "${bundle_dir}/${distribution_name}/lib/${distribution_name}.jar" -C "${bundle_dir}/jar-content" fixture.txt
   chmod 0755 "${bundle_dir}/${distribution_name}/bin/${distribution_name}"
   COPYFILE_DISABLE=1 tar -C "$bundle_dir" -czf "$asset_path" "$distribution_name"
+}
+
+write_native_asset() {
+  local release_dir="$1"
+  local tag="$2"
+  local target="$3"
+  local asset_path="${release_dir}/${distribution_name}-${tag}-${target}.tar.gz"
+  local bundle_dir="${scratch_dir}/native-${target}"
+
+  rm -rf "$bundle_dir"
+  mkdir -p "$bundle_dir"
+  printf '#!/usr/bin/env sh\nprintf "projector native %s\\n"\n' "$target" > "${bundle_dir}/${distribution_name}"
+  chmod 0755 "${bundle_dir}/${distribution_name}"
+  COPYFILE_DISABLE=1 tar -C "$bundle_dir" -czf "$asset_path" "$distribution_name"
+}
+
+write_complete_release() {
+  local release_dir="$1"
+  local tag="$2"
+  write_portable_asset "$release_dir" "$tag"
+  write_native_asset "$release_dir" "$tag" linux-x64
+  write_native_asset "$release_dir" "$tag" macos-arm64
+  write_sha256sums "$release_dir"
 }
 
 write_sha256sums() {
@@ -67,23 +90,23 @@ tag="v9.8.7"
 release_dir="${scratch_dir}/release"
 mkdir -p "$release_dir"
 
-write_asset "$release_dir" "$tag"
-write_sha256sums "$release_dir"
+write_complete_release "$release_dir" "$tag"
 "$verifier" --release-dir "$release_dir" --tag "$tag"
 
 rm -rf "$release_dir"
 mkdir -p "$release_dir"
-: > "${release_dir}/SHA256SUMS"
+write_portable_asset "$release_dir" "$tag"
+write_native_asset "$release_dir" "$tag" linux-x64
+write_sha256sums "$release_dir"
 if "$verifier" --release-dir "$release_dir" --tag "$tag" >/dev/null 2>"${scratch_dir}/missing.err"; then
-  die "release without JVM archive unexpectedly verified"
+  die "release without macOS arm64 archive unexpectedly verified"
 fi
 grep -Fq "missing release asset" "${scratch_dir}/missing.err" \
   || die "missing asset failure did not mention missing release asset"
 
 rm -rf "$release_dir"
 mkdir -p "$release_dir"
-write_asset "$release_dir" "$tag"
-write_sha256sums "$release_dir"
+write_complete_release "$release_dir" "$tag"
 printf 'tampered\n' >> "${release_dir}/${distribution_name}-${tag}.tar.gz"
 if "$verifier" --release-dir "$release_dir" --tag "$tag" >/dev/null 2>"${scratch_dir}/checksum.err"; then
   die "tampered asset unexpectedly verified"
@@ -93,8 +116,7 @@ grep -Fq "checksum mismatch" "${scratch_dir}/checksum.err" \
 
 rm -rf "$release_dir"
 mkdir -p "$release_dir"
-write_asset "$release_dir" "$tag"
-write_sha256sums "$release_dir"
+write_complete_release "$release_dir" "$tag"
 cp "${release_dir}/${distribution_name}-${tag}.tar.gz" "${release_dir}/${distribution_name}-${tag}-debug.tar.gz"
 printf '%s  %s\n' \
   "$(compute_sha256 "${release_dir}/${distribution_name}-${tag}-debug.tar.gz")" \
@@ -108,7 +130,7 @@ grep -Fq "unexpected release asset" "${scratch_dir}/extra.err" \
 
 rm -rf "$release_dir"
 mkdir -p "$release_dir"
-write_asset "$release_dir" "$tag"
+write_complete_release "$release_dir" "$tag"
 rm -rf "${scratch_dir}/forbidden"
 mkdir -p "${scratch_dir}/forbidden"
 COPYFILE_DISABLE=1 tar -xzf "${release_dir}/${distribution_name}-${tag}.tar.gz" -C "${scratch_dir}/forbidden"
@@ -126,5 +148,30 @@ if "$verifier" --release-dir "$release_dir" --tag "$tag" >/dev/null 2>"${scratch
 fi
 grep -Fq "contains forbidden entries" "${scratch_dir}/native.err" \
   || die "native JAR failure did not mention forbidden entries"
+
+selected_dir="${scratch_dir}/selected"
+mkdir -p "$selected_dir"
+cp "${release_dir}/SHA256SUMS" "$selected_dir/"
+cp \
+  "${release_dir}/${distribution_name}-${tag}-linux-x64.tar.gz" \
+  "$selected_dir/"
+"$verifier" \
+  --release-dir "$selected_dir" \
+  --tag "$tag" \
+  --asset "${distribution_name}-${tag}-linux-x64.tar.gz"
+
+rm -rf "$selected_dir"
+mkdir -p "$selected_dir"
+write_portable_asset "$selected_dir" "$tag"
+write_sha256sums "$selected_dir"
+"$verifier" \
+  --release-dir "$selected_dir" \
+  --tag "$tag" \
+  --asset "${distribution_name}-${tag}.tar.gz"
+if "$verifier" --release-dir "$selected_dir" --tag "$tag" >/dev/null 2>"${scratch_dir}/legacy-full.err"; then
+  die "legacy portable-only release unexpectedly passed complete-release verification"
+fi
+grep -Fq "missing release asset" "${scratch_dir}/legacy-full.err" \
+  || die "portable-only full verification did not report missing native assets"
 
 printf 'OK release asset verifier\n'

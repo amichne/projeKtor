@@ -13,9 +13,12 @@ is_required_path() {
   case "$1" in
     .github/actions/project/run.sh | \
       .github/fixtures/source-projection/source/* | \
+      .github/scripts/build-native-release-asset.sh | \
       .github/scripts/build-pages-site.sh | \
       .github/scripts/test-dependency-versions.sh | \
       .github/scripts/test-distribution-identity.sh | \
+      .github/scripts/test-native-delivery.sh | \
+      .github/scripts/test-native-executable.sh | \
       .github/scripts/test-pages-site.sh | \
       .github/scripts/test-release-asset-verifier.sh | \
       .github/scripts/test-release-workflow-contract.sh | \
