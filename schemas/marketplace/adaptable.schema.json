@@ -164,6 +164,139 @@
         ]
       ]
     },
+    "adapters": {
+      "description": "Validated harness-native marketplace documents retained as lossless adapter authorities. projeKtor may refine deployment paths while preserving the harness-specific presentation and policy fields.",
+      "examples": [
+        {
+          "type": "CODEX_MARKETPLACE_ADAPTER",
+          "codex": {
+            "name": "acme-tools",
+            "interface": {
+              "displayName": "Acme Tools"
+            },
+            "plugins": []
+          }
+        }
+      ],
+      "oneOf": [
+        {
+          "type": "object",
+          "examples": [
+            {
+              "type": "CODEX_MARKETPLACE_ADAPTER",
+              "codex": {
+                "name": "acme-tools",
+                "interface": {
+                  "displayName": "Acme Tools"
+                },
+                "plugins": []
+              }
+            }
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "CODEX_MARKETPLACE_ADAPTER"
+              ],
+              "examples": [
+                "CODEX_MARKETPLACE_ADAPTER"
+              ]
+            },
+            "codex": {
+              "$ref": "./codex.schema.json"
+            }
+          },
+          "required": [
+            "type",
+            "codex"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "examples": [
+            {
+              "type": "GITHUB_COPILOT_MARKETPLACE_ADAPTER",
+              "github-copilot": {
+                "name": "acme-tools",
+                "owner": {
+                  "name": "Platform Team"
+                },
+                "plugins": []
+              }
+            }
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "GITHUB_COPILOT_MARKETPLACE_ADAPTER"
+              ],
+              "examples": [
+                "GITHUB_COPILOT_MARKETPLACE_ADAPTER"
+              ]
+            },
+            "github-copilot": {
+              "$ref": "./github.schema.json"
+            }
+          },
+          "required": [
+            "type",
+            "github-copilot"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "examples": [
+            {
+              "type": "MULTI_HARNESS_MARKETPLACE_ADAPTER",
+              "codex": {
+                "name": "acme-tools",
+                "interface": {
+                  "displayName": "Acme Tools"
+                },
+                "plugins": []
+              },
+              "github-copilot": {
+                "name": "acme-tools",
+                "owner": {
+                  "name": "Platform Team"
+                },
+                "plugins": []
+              }
+            }
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "MULTI_HARNESS_MARKETPLACE_ADAPTER"
+              ],
+              "examples": [
+                "MULTI_HARNESS_MARKETPLACE_ADAPTER"
+              ]
+            },
+            "codex": {
+              "$ref": "./codex.schema.json"
+            },
+            "github-copilot": {
+              "$ref": "./github.schema.json"
+            }
+          },
+          "required": [
+            "type",
+            "codex",
+            "github-copilot"
+          ],
+          "additionalProperties": false
+        }
+      ],
+      "discriminator": {
+        "propertyName": "type"
+      }
+    },
     "metadata": {
       "$ref": "../core/reference-definitions.schema.json#/$defs/StringMap"
     }

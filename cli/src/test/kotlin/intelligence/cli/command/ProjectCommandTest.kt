@@ -22,13 +22,15 @@ class ProjectCommandTest {
     lateinit var temporaryDirectory: Path
 
     @Test
-    fun `root help exposes only projection`() {
+    fun `root help exposes projection ingestion and validation`() {
         val result = RootCommand().test("--help")
 
         assertEquals(0, result.statusCode)
         assertTrue(result.stdout.contains("Project provider-neutral agent tooling"))
         assertTrue(result.stdout.lineSequence().any { line -> line.trimStart().startsWith("project ") })
-        listOf("doctor", "setup", "validate", "marketplace", "rpc", "install", "publish").forEach { command ->
+        assertTrue(result.stdout.lineSequence().any { line -> line.trimStart().startsWith("ingest ") })
+        assertTrue(result.stdout.lineSequence().any { line -> line.trimStart().startsWith("validate ") })
+        listOf("doctor", "setup", "marketplace", "rpc", "install", "publish").forEach { command ->
             assertFalse(result.stdout.lineSequence().any { line -> line.trimStart().startsWith("$command ") })
         }
     }
@@ -197,6 +199,7 @@ class ProjectCommandTest {
                       "name": "core-agent"
                     }
                   ],
+                  "instructions": [],
                   "hooks": [
                     {
                       "type": "HOOK",

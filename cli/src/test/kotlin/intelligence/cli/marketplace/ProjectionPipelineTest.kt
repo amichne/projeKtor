@@ -13,10 +13,187 @@ import kotlin.io.path.exists
 import kotlin.io.path.writeText
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.jsonObject
 
 class ProjectionPipelineTest {
+    @Test
+    fun `retained native adapters are exposed by their matching projection`() {
+        val repository = minimalMarketplaceRepository()
+        writeJson(
+            repository.resolve("source/adaptable.marketplace.json"),
+            """
+            {
+              "type": "MARKETPLACE",
+              "schemaVersion": 1,
+              "name": "fixture-marketplace",
+              "owner": { "name": "Neutral Owner" },
+              "plugins": [
+                {
+                  "type": "PLUGIN_ENTRY",
+                  "name": "core-plugin",
+                  "plugin": {
+                    "type": "PLUGIN_REFERENCE",
+                    "name": "core-plugin",
+                    "source": { "type": "LOCAL_SOURCE", "path": "./plugins/core-plugin" },
+                    "version": "2.0.0"
+                  }
+                }
+              ],
+              "adapters": {
+                "type": "MULTI_HARNESS_MARKETPLACE_ADAPTER",
+                "codex": {
+                  "name": "fixture-marketplace",
+                  "interface": { "displayName": "Native Codex Catalog" },
+                  "plugins": [
+                    {
+                      "name": "core-plugin",
+                      "source": { "source": "local", "path": "./.agents/plugins/core-plugin" },
+                      "policy": { "installation": "INSTALLED_BY_DEFAULT", "authentication": "ON_USE" },
+                      "category": "Research"
+                    }
+                  ]
+                },
+                "github-copilot": {
+                  "${'$'}schema": "github-marketplace.schema.json",
+                  "name": "fixture-marketplace",
+                  "owner": { "name": "Native GitHub Owner", "url": "https://example.com/team" },
+                  "metadata": {
+                    "description": "Native GitHub catalog.",
+                    "version": "7.0.0",
+                    "pluginRoot": ".github/plugin"
+                  },
+                  "plugins": [
+                    {
+                      "name": "core-plugin",
+                      "source": "core-plugin",
+                      "homepage": "https://example.com/core-plugin",
+                      "strict": true
+                    }
+                  ]
+                }
+              }
+            }
+            """.trimIndent(),
+        )
+        writeJson(
+            repository.resolve("source/plugins/core-plugin/plugin.json"),
+            """
+            {
+              "type": "PLUGIN",
+              "schemaVersion": 1,
+              "name": "core-plugin",
+              "version": "2.0.0",
+              "description": "Neutral plugin.",
+              "skills": [],
+              "agents": [],
+              "instructions": [],
+              "hooks": [],
+              "adapters": {
+                "type": "MULTI_HARNESS_PLUGIN_ADAPTER",
+                "codex": {
+                  "id": "native-codex-id",
+                  "name": "core-plugin",
+                  "version": "2.0.0",
+                  "description": "Native Codex plugin.",
+                  "author": { "name": "Native Codex Author" },
+                  "interface": {
+                    "displayName": "Native Codex Plugin",
+                    "shortDescription": "Native Codex plugin.",
+                    "longDescription": "Native Codex plugin retained by the adaptable manifest.",
+                    "developerName": "Native Codex Author",
+                    "category": "Research",
+                    "capabilities": ["Interactive"],
+                    "brandColor": "#123456",
+                    "defaultPrompt": ["Use the native Codex plugin."]
+                  }
+                },
+                "github-copilot": {
+                  "name": "core-plugin",
+                  "version": "2.0.0",
+                  "description": "Native GitHub plugin.",
+                  "author": { "name": "Native GitHub Author" },
+                  "homepage": "https://example.com/native-github-plugin",
+                  "category": "Research",
+                  "tags": ["native"]
+                }
+              }
+            }
+            """.trimIndent(),
+        )
+        val codexOutput = Files.createTempDirectory("source-projection-native-adapter-codex-")
+        val githubOutput = Files.createTempDirectory("source-projection-native-adapter-github-")
+
+        MarketplaceProjector(output = {}).materialize(repository, codexOutput, MarketplaceProvider.Codex)
+        MarketplaceProjector(output = {}).materialize(repository, githubOutput, MarketplaceProvider.GitHub)
+
+        val codexMarketplace = JsonFiles.readObject(codexOutput.resolve(".agents/plugins/marketplace.json"))
+        val codexEntry = codexMarketplace.arrayValue("plugins").single().jsonObject
+        val codexPlugin = JsonFiles.readObject(
+            codexOutput.resolve(".agents/plugins/core-plugin/.codex-plugin/plugin.json"),
+        )
+        assertEquals("Native Codex Catalog", codexMarketplace.objectValue("interface")?.stringValue("displayName"))
+        assertEquals("INSTALLED_BY_DEFAULT", codexEntry.objectValue("policy")?.stringValue("installation"))
+        assertEquals("Research", codexEntry.stringValue("category"))
+        assertEquals("native-codex-id", codexPlugin.stringValue("id"))
+        assertEquals("Native Codex Author", codexPlugin.objectValue("author")?.stringValue("name"))
+
+        val githubMarketplace = JsonFiles.readObject(githubOutput.resolve(".github/plugin/marketplace.json"))
+        val githubEntry = githubMarketplace.arrayValue("plugins").single().jsonObject
+        val githubPlugin = JsonFiles.readObject(githubOutput.resolve(".github/plugin/core-plugin/plugin.json"))
+        assertEquals("7.0.0", githubMarketplace.objectValue("metadata")?.stringValue("version"))
+        assertEquals("https://example.com/team", githubMarketplace.objectValue("owner")?.stringValue("url"))
+        assertEquals("https://example.com/core-plugin", githubEntry.stringValue("homepage"))
+        assertEquals("https://example.com/native-github-plugin", githubPlugin.stringValue("homepage"))
+        assertEquals("Native GitHub Author", githubPlugin.objectValue("author")?.stringValue("name"))
+
+        assertEquals(
+            0,
+            ProjectionValidator(output = {}).validate(
+                ProjectionValidationOptions(repo = repository, hydrated = codexOutput),
+            ),
+        )
+        assertEquals(
+            0,
+            ProjectionValidator(output = {}).validate(
+                ProjectionValidationOptions(repo = repository, hydrated = githubOutput),
+            ),
+        )
+    }
+
+    @Test
+    fun `projection fails closed when a retained adapter changes marketplace identity`() {
+        val repository = minimalMarketplaceRepository()
+        writeJson(
+            repository.resolve("source/adaptable.marketplace.json"),
+            """
+            {
+              "type": "MARKETPLACE",
+              "schemaVersion": 1,
+              "name": "fixture-marketplace",
+              "owner": { "name": "Fixture Owner" },
+              "plugins": [],
+              "adapters": {
+                "type": "CODEX_MARKETPLACE_ADAPTER",
+                "codex": {
+                  "name": "different-marketplace",
+                  "interface": { "displayName": "Different Marketplace" },
+                  "plugins": []
+                }
+              }
+            }
+            """.trimIndent(),
+        )
+        val output = Files.createTempDirectory("source-projection-conflicting-adapter-")
+
+        val failure = assertFailsWith<MarketplaceFailure.InvalidSource> {
+            MarketplaceProjector(output = {}).materialize(repository, output, MarketplaceProvider.Codex)
+        }
+
+        assertTrue(failure.message.orEmpty().contains("does not match `fixture-marketplace`"))
+    }
+
     @Test
     fun `materialize serializes each published harness projection`() {
         val codexOutput = Files.createTempDirectory("source-projection-codex-test-")

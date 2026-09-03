@@ -69,6 +69,10 @@ require_literal "$release" './gradlew :cli:nativeCompile' 'release must compile 
 require_literal "$release" '.github/scripts/build-native-release-asset.sh' 'release must package through the checked-in boundary'
 require_literal "$release" '.github/scripts/test-native-executable.sh' 'release must smoke-test the produced executable'
 require_literal "$release" 'needs.native.result == '\''success'\''' 'release publication must wait for both native targets'
+require_literal .github/scripts/test-native-executable.sh 'native_run --schema' 'native smoke test must prove packaged schema resources'
+require_literal .github/scripts/test-native-executable.sh 'native_run ingest --shape codex-marketplace' 'native smoke test must prove generated serializers'
+require_literal .github/scripts/test-native-executable.sh 'native_run validate --shape adaptable-marketplace' 'native smoke test must prove runtime validation'
+require_literal cli/build.gradle.kts '--initialize-at-build-time=kotlin.DeprecationLevel' 'native build must declare the Kotlin class-initialization boundary'
 
 require_literal "$ci" 'name: Verify native executable' 'CI must exercise a real native executable'
 require_literal "$ci" 'graalvm/setup-graalvm@bef4b0e916c7dd079bf60fb95d49139f67e32c5f # v1.5.3' 'CI GraalVM setup action must be pinned'

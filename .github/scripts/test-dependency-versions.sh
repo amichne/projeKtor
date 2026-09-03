@@ -14,8 +14,10 @@ require_literal() {
 }
 
 require_literal cli/build.gradle.kts 'kotlin("jvm") version "2.4.10"'
+require_literal cli/build.gradle.kts 'kotlin("plugin.serialization") version "2.4.10"'
 require_literal cli/build.gradle.kts 'id("org.graalvm.buildtools.native") version "1.1.9"'
 require_literal cli/build.gradle.kts 'com.github.ajalt.clikt:clikt-core:5.1.0'
+require_literal cli/build.gradle.kts 'io.github.optimumcode:json-schema-validator:0.5.5'
 require_literal cli/build.gradle.kts 'org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0'
 if grep -Fq -- 'mordant' cli/build.gradle.kts; then
   printf 'error: unused Mordant dependency must remain removed\n' >&2

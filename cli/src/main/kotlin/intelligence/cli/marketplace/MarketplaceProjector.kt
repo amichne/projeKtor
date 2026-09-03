@@ -6,14 +6,15 @@ import intelligence.cli.io.Digests
 import intelligence.cli.io.FileSystem
 import intelligence.cli.io.JsonFiles
 import intelligence.cli.io.arrayValue
-import intelligence.cli.io.jsonArrayOfStrings
 import intelligence.cli.io.normalizedAbsolute
 import intelligence.cli.io.objectValue
 import intelligence.cli.io.putIfNotNull
-import intelligence.cli.io.putStringArray
 import intelligence.cli.io.stringList
 import intelligence.cli.io.stringValue
 import intelligence.cli.io.toCliPath
+import intelligence.cli.schema.DocumentShape
+import intelligence.cli.schema.DocumentValidation
+import intelligence.cli.schema.SchemaDocumentValidator
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Instant
@@ -27,11 +28,9 @@ import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.add
-import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
@@ -92,10 +91,11 @@ internal class MarketplaceProjector(
         resolver: RemoteMarketplaceResolver,
     ) {
         val marketplace = marketplace(repoRoot)
+        val adaptableMarketplace = adaptableMarketplaceWithAdapters(marketplace)
         val owner = marketplace.objectValue("owner") ?: JsonObject(emptyMap())
         val ownerName = owner.stringValue("name") ?: "Local developer"
         val pluginsRoot = outRoot.resolve(CODEX_BRANCH_PLUGINS_PATH)
-        val codexPlugins = mutableListOf<JsonObject>()
+        val codexPlugins = mutableListOf<CodexMarketplacePluginEntry>()
         val lockPlugins = mutableListOf<JsonObject>()
 
         marketplace.arrayValue("plugins").forEachObject { entry ->
@@ -111,7 +111,10 @@ internal class MarketplaceProjector(
             lockPlugins.add(lockEntry(pluginProjection, codexManifest, hydrated))
         }
 
-        JsonFiles.writeObject(outRoot.resolve(CODEX_BRANCH_MARKETPLACE_PATH), codexMarketplace(marketplace, codexPlugins))
+        JsonFiles.writeObject(
+            outRoot.resolve(CODEX_BRANCH_MARKETPLACE_PATH),
+            codexMarketplace(marketplace, adaptableMarketplace, codexPlugins),
+        )
         JsonFiles.writeObject(outRoot.resolve(CODEX_BRANCH_LOCK_PATH), codexLock(repoRoot, generatedAt, sourceSha, lockPlugins))
     }
 
@@ -121,10 +124,11 @@ internal class MarketplaceProjector(
         resolver: RemoteMarketplaceResolver,
     ) {
         val marketplace = marketplace(repoRoot)
+        val adaptableMarketplace = adaptableMarketplaceWithAdapters(marketplace)
         val owner = marketplace.objectValue("owner") ?: JsonObject(emptyMap())
         val ownerName = owner.stringValue("name") ?: "Local developer"
         val pluginsRoot = outRoot.resolve(GITHUB_BRANCH_PLUGINS_PATH)
-        val githubPlugins = mutableListOf<JsonObject>()
+        val githubPlugins = mutableListOf<GitHubMarketplacePluginEntry>()
 
         marketplace.arrayValue("plugins").forEachObject { entry ->
             val pluginProjection = hydrateProjection(repoRoot, entry, owner, ownerName, resolver)
@@ -144,7 +148,7 @@ internal class MarketplaceProjector(
 
         JsonFiles.writeObject(
             outRoot.resolve(GITHUB_BRANCH_MARKETPLACE_PATH),
-            githubMarketplace(marketplace, owner, ownerName, githubPlugins),
+            githubMarketplace(marketplace, adaptableMarketplace, owner, ownerName, githubPlugins),
         )
     }
 
@@ -160,6 +164,7 @@ internal class MarketplaceProjector(
         val sourcePath = pluginRef.requiredObject("source").requiredString("path")
         val manifestPath = resolveSourcePath(sourceEntry.repoRoot, sourcePath).resolve("plugin.json")
         val manifest = JsonFiles.readObject(manifestPath)
+        val adaptableManifest = adaptablePluginWithAdapters(manifest, manifestPath)
         val name = manifest.requiredString("name")
         val description = manifest.stringValue("description")
             ?: entry.stringValue("description")
@@ -176,7 +181,8 @@ internal class MarketplaceProjector(
             tags = tags,
             category = categoryFor(tags),
             owner = personFor(owner, ownerName),
-            interfaceMetadata = CodexPluginInterface.fromManifest(manifest, manifestPath),
+            interfaceMetadata = NeutralPluginInterfaceMetadata.fromManifest(manifest, manifestPath),
+            adaptableManifest = adaptableManifest,
         )
     }
 
@@ -441,30 +447,178 @@ internal class MarketplaceProjector(
         )
     }
 
-    private fun codexMarketplace(marketplace: JsonObject, plugins: List<JsonObject>): JsonObject =
-        buildJsonObject {
-            put("name", marketplace.requiredString("name"))
-            putJsonObject("interface") {
-                put("displayName", titleCase(marketplace.requiredString("name")))
+    private fun adaptableMarketplaceWithAdapters(source: JsonObject): AdaptableMarketplaceDocument? {
+        if ("adapters" !in source) return null
+        val validated =
+            when (val validation = SchemaDocumentValidator.validate(DocumentShape.AdaptableMarketplace, source)) {
+                is DocumentValidation.Valid -> validation.document
+                is DocumentValidation.Invalid ->
+                    throw MarketplaceFailure.InvalidSource(
+                        "$ADAPTABLE_MARKETPLACE_PATH: ${validation.violations.joinToString("; ")}",
+                    )
             }
-            put("plugins", JsonArray(plugins))
+        return when (val decoding = HarnessDocumentCodec.decodeAdaptable(validated)) {
+            is HarnessDocumentDecoding.Decoded ->
+                decoding.document as? AdaptableMarketplaceDocument
+                    ?: throw MarketplaceFailure.InvalidSource(
+                        "$ADAPTABLE_MARKETPLACE_PATH: decoded document is not an adaptable marketplace",
+                    )
+            is HarnessDocumentDecoding.Rejected ->
+                throw MarketplaceFailure.InvalidSource(
+                    "$ADAPTABLE_MARKETPLACE_PATH: ${decoding.reason}",
+                )
         }
+    }
+
+    private fun adaptablePluginWithAdapters(
+        source: JsonObject,
+        sourcePath: Path,
+    ): AdaptablePluginDocument? {
+        if ("adapters" !in source) return null
+        val validated =
+            when (val validation = SchemaDocumentValidator.validate(DocumentShape.AdaptablePlugin, source)) {
+                is DocumentValidation.Valid -> validation.document
+                is DocumentValidation.Invalid ->
+                    throw MarketplaceFailure.InvalidSource(
+                        "$sourcePath: ${validation.violations.joinToString("; ")}",
+                    )
+            }
+        return when (val decoding = HarnessDocumentCodec.decodeAdaptable(validated)) {
+            is HarnessDocumentDecoding.Decoded ->
+                decoding.document as? AdaptablePluginDocument
+                    ?: throw MarketplaceFailure.InvalidSource(
+                        "$sourcePath: decoded document is not an adaptable plugin",
+                    )
+            is HarnessDocumentDecoding.Rejected ->
+                throw MarketplaceFailure.InvalidSource("$sourcePath: ${decoding.reason}")
+        }
+    }
+
+    private fun requireMarketplaceAdapterIdentity(
+        adaptableName: String,
+        adapterName: String,
+        adaptablePlugins: List<String>,
+        adapterPlugins: List<String>,
+        harness: String,
+    ) {
+        if (adaptableName != adapterName) {
+            throw MarketplaceFailure.InvalidSource(
+                "$harness marketplace adapter name `$adapterName` does not match `$adaptableName`",
+            )
+        }
+        val adapterNames = adapterPlugins.toSet()
+        val adaptableNames = adaptablePlugins.toSet()
+        if (
+            adapterNames.size != adapterPlugins.size ||
+            adaptableNames.size != adaptablePlugins.size ||
+            adapterNames != adaptableNames
+        ) {
+            throw MarketplaceFailure.InvalidSource(
+                "$harness marketplace adapter plugins must match the adaptable marketplace plugins",
+            )
+        }
+    }
+
+    private fun requirePluginAdapterIdentity(
+        plugin: PluginProjection,
+        adapterName: String,
+        adapterVersion: String?,
+        harness: String,
+    ) {
+        val adaptable = plugin.adaptableManifest
+            ?: throw MarketplaceFailure.InvalidSource("$harness plugin adapter has no adaptable authority")
+        if (adapterName != adaptable.name) {
+            throw MarketplaceFailure.InvalidSource(
+                "$harness plugin adapter name `$adapterName` does not match `${adaptable.name}`",
+            )
+        }
+        val adaptableVersion = adaptable.version
+        if (adaptableVersion != null && adapterVersion != null && adapterVersion != adaptableVersion) {
+            throw MarketplaceFailure.InvalidSource(
+                "$harness plugin adapter version `$adapterVersion` does not match `$adaptableVersion`",
+            )
+        }
+    }
+
+    private fun codexMarketplace(
+        marketplace: JsonObject,
+        adaptable: AdaptableMarketplaceDocument?,
+        plugins: List<CodexMarketplacePluginEntry>,
+    ): JsonObject {
+        val adapter = adaptable?.adapters?.codex
+        if (adapter != null) {
+            requireMarketplaceAdapterIdentity(
+                adaptableName = adaptable.name,
+                adapterName = adapter.name,
+                adaptablePlugins = adaptable.plugins.map(AdaptablePluginEntry::name),
+                adapterPlugins = adapter.plugins.map(CodexMarketplacePluginEntry::name),
+                harness = "Codex",
+            )
+            return HarnessDocumentCodec.encode(
+                adapter.copy(
+                    plugins = adapter.plugins.map { entry ->
+                        entry.copy(
+                            source = entry.source.copy(
+                                source = CodexLocalPluginSourceType.Local,
+                                path = codexPluginSourcePath(entry.name),
+                            ),
+                        )
+                    },
+                ),
+            )
+        }
+        val name = marketplace.requiredString("name")
+        return HarnessDocumentCodec.encode(
+            CodexMarketplaceDocument(
+                name = name,
+                presentation = CodexMarketplaceInterface(displayName = titleCase(name)),
+                plugins = plugins,
+            ),
+        )
+    }
 
     private fun githubMarketplace(
         marketplace: JsonObject,
+        adaptable: AdaptableMarketplaceDocument?,
         owner: JsonObject,
         ownerName: String,
-        plugins: List<JsonObject>,
-    ): JsonObject =
-        buildJsonObject {
-            put("name", marketplace.requiredString("name"))
-            put("owner", personFor(owner, ownerName))
-            putJsonObject("metadata") {
-                put("description", marketplace.stringValue("description") ?: "")
-                put("pluginRoot", GITHUB_MARKETPLACE_PLUGIN_ROOT)
-            }
-            put("plugins", JsonArray(plugins))
+        plugins: List<GitHubMarketplacePluginEntry>,
+    ): JsonObject {
+        val adapter = adaptable?.adapters?.githubCopilot
+        if (adapter != null) {
+            requireMarketplaceAdapterIdentity(
+                adaptableName = adaptable.name,
+                adapterName = adapter.name,
+                adaptablePlugins = adaptable.plugins.map(AdaptablePluginEntry::name),
+                adapterPlugins = adapter.plugins.map(GitHubMarketplacePluginEntry::name),
+                harness = "GitHub Copilot",
+            )
+            return HarnessDocumentCodec.encode(
+                adapter.copy(
+                    metadata = (adapter.metadata ?: GitHubMarketplaceMetadata()).copy(
+                        pluginRoot = GITHUB_MARKETPLACE_PLUGIN_ROOT,
+                    ),
+                    plugins = adapter.plugins.map { entry ->
+                        entry.copy(
+                            source = JsonFiles.json.encodeToJsonElement(String.serializer(), entry.name),
+                            strict = true,
+                        )
+                    },
+                ),
+            )
         }
+        return HarnessDocumentCodec.encode(
+            GitHubMarketplaceDocument(
+                name = marketplace.requiredString("name"),
+                owner = personFor(owner, ownerName),
+                metadata = GitHubMarketplaceMetadata(
+                    description = marketplace.stringValue("description") ?: "",
+                    pluginRoot = GITHUB_MARKETPLACE_PLUGIN_ROOT,
+                ),
+                plugins = plugins,
+            ),
+        )
+    }
 
     private fun codexLock(
         repoRoot: Path,
@@ -480,19 +634,19 @@ internal class MarketplaceProjector(
             put("plugins", JsonArray(plugins))
         }
 
-    private fun codexMarketplaceEntry(pluginName: String, category: String): JsonObject =
-        buildJsonObject {
-            put("name", pluginName)
-            putJsonObject("source") {
-                put("source", "local")
-                put("path", codexPluginSourcePath(pluginName))
-            }
-            putJsonObject("policy") {
-                put("installation", "AVAILABLE")
-                put("authentication", "ON_INSTALL")
-            }
-            put("category", category)
-        }
+    private fun codexMarketplaceEntry(pluginName: String, category: String): CodexMarketplacePluginEntry =
+        CodexMarketplacePluginEntry(
+            name = pluginName,
+            source = CodexLocalPluginSource(
+                source = CodexLocalPluginSourceType.Local,
+                path = codexPluginSourcePath(pluginName),
+            ),
+            policy = CodexPluginPolicy(
+                installation = CodexInstallationPolicy.Available,
+                authentication = CodexAuthenticationPolicy.OnInstall,
+            ),
+            category = category,
+        )
 
     private fun codexPluginSourcePath(pluginName: String): String =
         "./${CODEX_BRANCH_PLUGINS_PATH.resolve(pluginName).toString().replace('\\', '/')}"
@@ -501,69 +655,82 @@ internal class MarketplaceProjector(
         plugin: PluginProjection,
         ownerName: String,
         hydrated: HydratedPlugin,
-    ): JsonObject =
-        buildJsonObject {
-            put("name", plugin.name)
-            put("version", plugin.version)
-            put("description", plugin.description)
-            putJsonObject("author") {
-                put("name", ownerName)
-            }
-            put("license", "UNLICENSED")
-            putStringArray("keywords", (listOf(plugin.name) + plugin.tags).toSortedSet())
-            putJsonObject("interface") {
-                put("displayName", titleCase(plugin.name))
-                put("shortDescription", shortDescription(plugin.description))
-                put("longDescription", plugin.description)
-                put("developerName", ownerName)
-                put("category", plugin.category)
-                putStringArray("capabilities", capabilitiesFor(hydrated))
-                put("brandColor", brandColorFor(plugin.category))
-                put("defaultPrompt", defaultPrompts(plugin.name))
-                plugin.interfaceMetadata.writeTo(this)
-            }
-            if (hydrated.skills.isNotEmpty()) {
-                put("skills", "./skills/")
-            }
-            if (hydrated.hooks.isNotEmpty()) {
-                putStringArray("hooks", hydrated.hooks.sorted().map { path -> "./$path" })
-            }
+    ): JsonObject {
+        plugin.adaptableManifest?.adapters?.codex?.let { adapter ->
+            requirePluginAdapterIdentity(plugin, adapter.name, adapter.version, "Codex")
+            return HarnessDocumentCodec.encode(adapter)
         }
+        return HarnessDocumentCodec.encode(
+            CodexPluginDocument(
+                name = plugin.name,
+                version = plugin.version,
+                description = plugin.description,
+                author = HarnessPerson(name = ownerName),
+                license = "UNLICENSED",
+                keywords = (listOf(plugin.name) + plugin.tags).toSortedSet().toList(),
+                skills = "./skills/".takeIf { hydrated.skills.isNotEmpty() },
+                hooks = hydrated.hooks
+                    .takeIf { hooks -> hooks.isNotEmpty() }
+                    ?.sorted()
+                    ?.map { path -> "./$path" },
+                presentation = CodexPluginInterface(
+                    displayName = titleCase(plugin.name),
+                    shortDescription = shortDescription(plugin.description),
+                    longDescription = plugin.description,
+                    developerName = ownerName,
+                    category = plugin.category,
+                    capabilities = capabilitiesFor(hydrated),
+                    websiteUrl = plugin.interfaceMetadata.websiteUrl?.value,
+                    privacyPolicyUrl = plugin.interfaceMetadata.privacyPolicyUrl?.value,
+                    termsOfServiceUrl = plugin.interfaceMetadata.termsOfServiceUrl?.value,
+                    brandColor = brandColorFor(plugin.category),
+                    defaultPrompt = defaultPrompts(plugin.name),
+                ),
+            ),
+        )
+    }
 
-    private fun githubCopilotPluginManifest(plugin: PluginProjection, hydrated: HydratedPlugin): JsonObject =
-        buildJsonObject {
-            put("name", plugin.name)
-            put("description", plugin.description)
-            put("version", plugin.version)
-            put("author", plugin.owner)
-            put("license", "UNLICENSED")
-            putStringArray("keywords", (listOf(plugin.name) + plugin.tags).toSortedSet())
-            put("category", plugin.category)
-            putStringArray("tags", plugin.tags)
-            if (hydrated.agents.isNotEmpty()) {
-                put("agents", "./agents")
-            }
-            if (hydrated.skills.isNotEmpty()) {
-                put("skills", "./skills")
-            }
-            if (hydrated.hooks.isNotEmpty()) {
-                put("hooks", "./hooks.json")
-            }
+    private fun githubCopilotPluginManifest(plugin: PluginProjection, hydrated: HydratedPlugin): JsonObject {
+        plugin.adaptableManifest?.adapters?.githubCopilot?.let { adapter ->
+            requirePluginAdapterIdentity(plugin, adapter.name, adapter.version, "GitHub Copilot")
+            return HarnessDocumentCodec.encode(
+                adapter.copy(version = adapter.version ?: plugin.version),
+            )
         }
+        return HarnessDocumentCodec.encode(
+            GitHubPluginDocument(
+                name = plugin.name,
+                description = plugin.description,
+                version = plugin.version,
+                author = plugin.owner,
+                license = "UNLICENSED",
+                keywords = (listOf(plugin.name) + plugin.tags).toSortedSet().toList(),
+                category = plugin.category,
+                tags = plugin.tags,
+                agents = componentPath("./agents", hydrated.agents),
+                skills = componentPath("./skills", hydrated.skills),
+                hooks = componentPath("./hooks.json", hydrated.hooks),
+            ),
+        )
+    }
 
-    private fun githubCopilotPluginEntry(plugin: PluginProjection): JsonObject =
-        buildJsonObject {
-            put("name", plugin.name)
-            put("source", plugin.name)
-            put("description", plugin.description)
-            put("version", plugin.version)
-            put("author", plugin.owner)
-            put("license", "UNLICENSED")
-            putStringArray("keywords", (listOf(plugin.name) + plugin.tags).toSortedSet())
-            put("category", plugin.category)
-            putStringArray("tags", plugin.tags)
-            put("strict", true)
-        }
+    private fun githubCopilotPluginEntry(plugin: PluginProjection): GitHubMarketplacePluginEntry =
+        GitHubMarketplacePluginEntry(
+            name = plugin.name,
+            source = JsonFiles.json.encodeToJsonElement(String.serializer(), plugin.name),
+            description = plugin.description,
+            version = plugin.version,
+            author = plugin.owner,
+            license = "UNLICENSED",
+            keywords = (listOf(plugin.name) + plugin.tags).toSortedSet().toList(),
+            category = plugin.category,
+            tags = plugin.tags,
+            strict = true,
+        )
+
+    private fun componentPath(path: String, components: Collection<String>): JsonElement? =
+        path.takeIf { components.isNotEmpty() }
+            ?.let { value -> JsonFiles.json.encodeToJsonElement(String.serializer(), value) }
 
     private fun removeGitHubAgentModelOverrides(pluginOut: Path, hydrated: HydratedPlugin) {
         hydrated.agents.forEach { relativePath ->
@@ -638,12 +805,12 @@ internal class MarketplaceProjector(
             put("references", hydrated.toReferenceJson())
         }
 
-    private fun personFor(owner: JsonObject, fallbackName: String): JsonObject =
-        buildJsonObject {
-            put("name", owner.stringValue("name") ?: fallbackName)
-            putIfNotNull("email", owner.stringValue("email"))
-            putIfNotNull("url", owner.stringValue("url"))
-        }
+    private fun personFor(owner: JsonObject, fallbackName: String): HarnessPerson =
+        HarnessPerson(
+            name = owner.stringValue("name") ?: fallbackName,
+            email = owner.stringValue("email"),
+            url = owner.stringValue("url"),
+        )
 
     private fun targetForPrimitive(
         pluginOut: Path,
@@ -1108,13 +1275,13 @@ internal class MarketplaceProjector(
             else -> "#475569"
         }
 
-    private fun defaultPrompts(pluginName: String): JsonArray {
+    private fun defaultPrompts(pluginName: String): List<String> {
         val display = titleCase(pluginName)
-        return buildJsonArray {
-            add("Use $display for this task.")
-            add("Review this repo with $display.")
-            add("Show the $display workflow.")
-        }
+        return listOf(
+            "Use $display for this task.",
+            "Review this repo with $display.",
+            "Show the $display workflow.",
+        )
     }
 
     private fun shortDescription(description: String): String =
@@ -1147,24 +1314,19 @@ internal class MarketplaceProjector(
         val description: String,
         val tags: List<String>,
         val category: String,
-        val owner: JsonObject,
-        val interfaceMetadata: CodexPluginInterface,
+        val owner: HarnessPerson,
+        val interfaceMetadata: NeutralPluginInterfaceMetadata,
+        val adaptableManifest: AdaptablePluginDocument?,
     ) {
         val version: String =
             manifest.stringValue("version") ?: pluginRef.stringValue("version") ?: "0.1.0"
     }
 
-    private data class CodexPluginInterface(
+    private data class NeutralPluginInterfaceMetadata(
         val websiteUrl: HttpsUrl?,
         val privacyPolicyUrl: HttpsUrl?,
         val termsOfServiceUrl: HttpsUrl?,
     ) {
-        fun writeTo(builder: JsonObjectBuilder) {
-            websiteUrl?.let { builder.put("websiteURL", it.value) }
-            privacyPolicyUrl?.let { builder.put("privacyPolicyURL", it.value) }
-            termsOfServiceUrl?.let { builder.put("termsOfServiceURL", it.value) }
-        }
-
         companion object {
             private val supportedFields = setOf(
                 "websiteURL",
@@ -1172,7 +1334,7 @@ internal class MarketplaceProjector(
                 "termsOfServiceURL",
             )
 
-            fun fromManifest(manifest: JsonObject, manifestPath: Path): CodexPluginInterface {
+            fun fromManifest(manifest: JsonObject, manifestPath: Path): NeutralPluginInterfaceMetadata {
                 val payload = manifest["interface"] ?: return empty
                 val source = payload as? JsonObject
                     ?: throw MarketplaceFailure.InvalidSource("${manifestPath}: interface must be an object")
@@ -1182,14 +1344,14 @@ internal class MarketplaceProjector(
                         "${manifestPath}: unsupported interface field(s): ${unknownFields.sorted().joinToString(", ")}"
                     )
                 }
-                return CodexPluginInterface(
+                return NeutralPluginInterfaceMetadata(
                     websiteUrl = source.httpsUrl("websiteURL", manifestPath),
                     privacyPolicyUrl = source.httpsUrl("privacyPolicyURL", manifestPath),
                     termsOfServiceUrl = source.httpsUrl("termsOfServiceURL", manifestPath),
                 )
             }
 
-            private val empty = CodexPluginInterface(
+            private val empty = NeutralPluginInterfaceMetadata(
                 websiteUrl = null,
                 privacyPolicyUrl = null,
                 termsOfServiceUrl = null,

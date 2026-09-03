@@ -120,6 +120,32 @@ def visit_references(value, base_path: Path):
 for schema_path, schema in documents.items():
     visit_references(schema, schema_path)
 
+adaptable_contract = documents[(schema_root / "marketplace/adaptable.schema.json").resolve()]
+reference_contract = documents[(schema_root / "core/reference-definitions.schema.json").resolve()]
+
+
+def adapter_shape_signature(contract):
+    return (
+        contract.get("discriminator"),
+        [
+            (
+                tuple(branch.get("properties", {}).get("type", {}).get("enum", [])),
+                tuple(branch.get("required", [])),
+                tuple(branch.get("properties", {}).keys()),
+                branch.get("additionalProperties"),
+            )
+            for branch in contract.get("oneOf", [])
+        ],
+    )
+
+
+if adapter_shape_signature(
+    adaptable_contract["properties"].get("adapters", {})
+) != adapter_shape_signature(
+    reference_contract["$defs"]["Marketplace"]["properties"].get("adapters", {})
+):
+    fail("adaptable marketplace adapter contract must match reference-definitions Marketplace")
+
 
 def dereference(node, base_path: Path):
     while isinstance(node, dict) and isinstance(node.get("$ref"), str):

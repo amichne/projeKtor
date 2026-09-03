@@ -67,6 +67,47 @@ native_run --version >"${proof_root}/version.out"
 [[ "$(tr -d '\r\n' < "${proof_root}/version.out")" == "${distribution_name} version ${tag}" ]] || \
   die "native --version output does not match ${distribution_name} version ${tag}"
 
+native_run --schema >"${proof_root}/schema.json"
+python3 - "${proof_root}/schema.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+schema = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+if schema.get("$schema") != "https://json-schema.org/draft/2020-12/schema":
+    raise SystemExit("native --schema did not emit Draft 2020-12")
+if len(schema.get("$defs", {})) != 16:
+    raise SystemExit("native --schema did not embed the complete schema suite")
+PY
+
+native_fixture="${repo_root}/schemas/marketplace/fixtures/codex.marketplace.json"
+native_run validate --shape codex-marketplace --input "$native_fixture" \
+  >"${proof_root}/validate-native.out" 2>"${proof_root}/validate-native.err"
+[[ ! -s "${proof_root}/validate-native.err" ]] || die "native schema validation wrote to stderr"
+native_run ingest --shape codex-marketplace --input "$native_fixture" --owner-name "Platform Team" \
+  >"${proof_root}/adaptable.marketplace.json" 2>"${proof_root}/ingest.err"
+[[ ! -s "${proof_root}/ingest.err" ]] || die "native ingestion wrote to stderr"
+native_run validate --shape adaptable-marketplace --input "${proof_root}/adaptable.marketplace.json" \
+  >"${proof_root}/validate-adaptable.out" 2>"${proof_root}/validate-adaptable.err"
+[[ ! -s "${proof_root}/validate-adaptable.err" ]] || die "native adaptable validation wrote to stderr"
+python3 - "$native_fixture" "${proof_root}/adaptable.marketplace.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+native = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+adaptable = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+adapters = adaptable.get("adapters", {})
+if adapters.get("type") != "CODEX_MARKETPLACE_ADAPTER":
+    raise SystemExit("native ingestion did not emit the closed Codex adapter variant")
+if adapters.get("codex") != native:
+    raise SystemExit("native ingestion did not preserve the complete Codex document")
+expected_sources = [entry["source"]["path"] for entry in native["plugins"]]
+actual_sources = [entry["plugin"]["source"]["path"] for entry in adaptable["plugins"]]
+if actual_sources != expected_sources:
+    raise SystemExit("native ingestion did not refine Codex plugin source paths losslessly")
+PY
+
 fixture="${repo_root}/.github/fixtures/source-projection"
 for harness in codex github-copilot; do
   output="${proof_root}/${harness}"

@@ -7,6 +7,9 @@ import intelligence.cli.io.objectValue
 import intelligence.cli.io.stringList
 import intelligence.cli.io.stringValue
 import intelligence.cli.marketplace.PrimitiveKind
+import intelligence.cli.schema.DocumentShape
+import intelligence.cli.schema.DocumentValidation
+import intelligence.cli.schema.SchemaDocumentValidator
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.io.path.exists
@@ -67,6 +70,7 @@ internal class ProjectionValidator(
         }
         val sourceRoot = repo.resolve(SOURCE_ROOT)
         val marketplace = readObject(marketplacePath, repo, issues) ?: return
+        validateSchema(DocumentShape.AdaptableMarketplace, marketplacePath, repo, marketplace, issues)
 
         requireValue(marketplace.stringValue("type") == "MARKETPLACE", marketplacePath, repo, "type must be MARKETPLACE", issues)
         requireValue(marketplace["schemaVersion"]?.primitiveContent() == "1", marketplacePath, repo, "schemaVersion must be 1", issues)
@@ -108,6 +112,7 @@ internal class ProjectionValidator(
                         val manifestPath = resolveSourcePath(sourceRoot, sourcePath, issues) ?: return@forEachObject
                         val manifestFile = manifestPath.resolve("plugin.json")
                         val manifest = readObject(manifestFile, repo, issues) ?: return@forEachObject
+                        validateSchema(DocumentShape.AdaptablePlugin, manifestFile, repo, manifest, issues)
                         validatePluginManifest(
                             repo = repo,
                             sourceRoot = sourceRoot,
@@ -431,6 +436,7 @@ internal class ProjectionValidator(
         issues: MutableList<String>,
     ): CodexHydratedMarketplace? {
         val marketplace = readObject(marketplacePath, root, issues) ?: return null
+        validateSchema(DocumentShape.CodexMarketplace, marketplacePath, root, marketplace, issues)
         requireString(marketplace, "name", marketplacePath, root, issues)
         marketplace.arrayValue("plugins").forEachObject { entry ->
             val name = requireString(entry, "name", marketplacePath, root, issues) ?: return@forEachObject
@@ -487,6 +493,7 @@ internal class ProjectionValidator(
         issues: MutableList<String>,
     ): GitHubHydratedMarketplace? {
         val marketplace = readObject(marketplacePath, root, issues) ?: return null
+        validateSchema(DocumentShape.GitHubCopilotMarketplace, marketplacePath, root, marketplace, issues)
         requireString(marketplace, "name", marketplacePath, root, issues)
         requireValue(
             marketplace.objectValue("owner") != null,
@@ -713,11 +720,34 @@ internal class ProjectionValidator(
         providerName: String,
         issues: MutableList<String>,
     ) {
+        val shape =
+            when (providerName) {
+                "Codex" -> DocumentShape.CodexPlugin
+                "GitHub" -> DocumentShape.GitHubCopilotPlugin
+                else -> error("unsupported hydrated plugin provider: $providerName")
+            }
+        validateSchema(shape, manifestPath, root, manifest, issues)
         val name = requireString(manifest, "name", manifestPath, root, issues)
         if (name != null && name != expectedName) {
             issues += "${manifestPath.relativeToUnix(root)}: $providerName plugin name `$name` does not match marketplace entry `$expectedName`"
         }
         requireString(manifest, "version", manifestPath, root, issues)
+    }
+
+    private fun validateSchema(
+        shape: DocumentShape,
+        path: Path,
+        displayRoot: Path,
+        document: JsonObject,
+        issues: MutableList<String>,
+    ) {
+        when (val validation = SchemaDocumentValidator.validate(shape, document)) {
+            is DocumentValidation.Valid -> Unit
+            is DocumentValidation.Invalid ->
+                validation.violations.forEach { violation ->
+                    issues += "${path.relativeToUnix(displayRoot)}: ${shape.cliName} schema: $violation"
+                }
+        }
     }
 
     private fun readObject(path: Path, displayRoot: Path, issues: MutableList<String>): JsonObject? {

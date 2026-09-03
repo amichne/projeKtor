@@ -6,6 +6,7 @@ layout for either Codex or GitHub Copilot.
 
 ```text
 source tree -> validate -> project -> validate -> harness payload
+harness JSON -> validate -> decode -> adaptable document -> validate -> project
 ```
 
 The action does not install, register, commit, or publish the generated
@@ -51,8 +52,41 @@ releases that predate native assets.
 supported Codex and GitHub Copilot output contracts. The Pages workflow
 publishes that schema tree byte-for-byte alongside a small usage guide.
 
-The schema construction and all local references are checked without adding a
-schema-validator dependency:
+The CLI packages the full schema tree and can print it as one self-contained
+Draft 2020-12 document:
+
+```sh
+projeKtor --schema
+```
+
+It can validate any supported document shape directly:
+
+```sh
+projeKtor validate --shape codex-plugin --input plugin.json
+projeKtor validate --shape adaptable-marketplace --input adaptable.marketplace.json
+```
+
+It can also refine a Codex or GitHub Copilot marketplace/plugin into the
+adaptable form while retaining the validated native document as its harness
+adapter. A Codex marketplace needs an owner because that native shape does not
+carry one:
+
+```sh
+projeKtor ingest --shape codex-marketplace --input marketplace.json \
+  --owner-name "Platform Team" > adaptable.marketplace.json
+projeKtor ingest --shape github-copilot-plugin --input plugin.json \
+  > adaptable.plugin.json
+projeKtor ingest --shape codex-plugin --input plugin.json \
+  --into adaptable.plugin.json > adaptable.plugin.with-codex.json
+```
+
+Supported `--shape` values are `adaptable-marketplace`, `adaptable-plugin`,
+`codex-marketplace`, `codex-plugin`, `github-copilot-marketplace`, and
+`github-copilot-plugin`. Ingestion accepts the four harness-native values;
+validation accepts all six.
+
+The schema construction, all local references, and the packaged validator are
+checked with:
 
 ```sh
 .github/scripts/test-schema-contracts.sh

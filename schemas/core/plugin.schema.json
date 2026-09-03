@@ -170,6 +170,155 @@
         ]
       ]
     },
+    "adapters": {
+      "description": "Validated harness-native plugin manifests retained as lossless adapter authorities.",
+      "examples": [
+        {
+          "type": "GITHUB_COPILOT_PLUGIN_ADAPTER",
+          "github-copilot": {
+            "name": "review-stack"
+          }
+        }
+      ],
+      "oneOf": [
+        {
+          "type": "object",
+          "examples": [
+            {
+              "type": "CODEX_PLUGIN_ADAPTER",
+              "codex": {
+                "name": "review-stack",
+                "version": "1.0.0",
+                "description": "Review workflow assets.",
+                "author": {
+                  "name": "Platform Team"
+                },
+                "interface": {
+                  "displayName": "Review Stack",
+                  "shortDescription": "Review workflow assets.",
+                  "longDescription": "Review workflow assets for product engineering.",
+                  "developerName": "Platform Team",
+                  "category": "Engineering",
+                  "capabilities": [
+                    "Interactive"
+                  ],
+                  "defaultPrompt": [
+                    "Use Review Stack."
+                  ]
+                }
+              }
+            }
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "CODEX_PLUGIN_ADAPTER"
+              ],
+              "examples": [
+                "CODEX_PLUGIN_ADAPTER"
+              ]
+            },
+            "codex": {
+              "$ref": "../adapters/codex/plugin.schema.json"
+            }
+          },
+          "required": [
+            "type",
+            "codex"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "examples": [
+            {
+              "type": "GITHUB_COPILOT_PLUGIN_ADAPTER",
+              "github-copilot": {
+                "name": "review-stack"
+              }
+            }
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "GITHUB_COPILOT_PLUGIN_ADAPTER"
+              ],
+              "examples": [
+                "GITHUB_COPILOT_PLUGIN_ADAPTER"
+              ]
+            },
+            "github-copilot": {
+              "$ref": "../adapters/github/plugin.schema.json"
+            }
+          },
+          "required": [
+            "type",
+            "github-copilot"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "examples": [
+            {
+              "type": "MULTI_HARNESS_PLUGIN_ADAPTER",
+              "codex": {
+                "name": "review-stack",
+                "version": "1.0.0",
+                "description": "Review workflow assets.",
+                "author": {
+                  "name": "Platform Team"
+                },
+                "interface": {
+                  "displayName": "Review Stack",
+                  "shortDescription": "Review workflow assets.",
+                  "longDescription": "Review workflow assets for product engineering.",
+                  "developerName": "Platform Team",
+                  "category": "Engineering",
+                  "capabilities": [
+                    "Interactive"
+                  ],
+                  "defaultPrompt": [
+                    "Use Review Stack."
+                  ]
+                }
+              },
+              "github-copilot": {
+                "name": "review-stack"
+              }
+            }
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "MULTI_HARNESS_PLUGIN_ADAPTER"
+              ],
+              "examples": [
+                "MULTI_HARNESS_PLUGIN_ADAPTER"
+              ]
+            },
+            "codex": {
+              "$ref": "../adapters/codex/plugin.schema.json"
+            },
+            "github-copilot": {
+              "$ref": "../adapters/github/plugin.schema.json"
+            }
+          },
+          "required": [
+            "type",
+            "codex",
+            "github-copilot"
+          ],
+          "additionalProperties": false
+        }
+      ],
+      "discriminator": {
+        "propertyName": "type"
+      }
+    },
     "metadata": {
       "$ref": "./reference-definitions.schema.json#/$defs/StringMap"
     }
