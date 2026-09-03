@@ -1,0 +1,1092 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "reference-definitions.schema.json",
+  "title": "REFERENCE_DEFINITIONS",
+  "description": "Shared reference graph definitions for provider-neutral agent primitives, plugin composition, marketplace catalogs, and lockfiles.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/SourceReference"
+    },
+    {
+      "$ref": "./skill.schema.json"
+    },
+    {
+      "$ref": "./agent.schema.json"
+    },
+    {
+      "$ref": "./instruction.schema.json"
+    },
+    {
+      "$ref": "./hook.schema.json"
+    },
+    {
+      "$ref": "#/$defs/PluginReference"
+    }
+  ],
+  "examples": [
+    {
+      "type": "SKILL",
+      "source": {
+        "type": "LOCAL_SOURCE",
+        "path": "./skills"
+      },
+      "path": "skills/code-review",
+      "name": "code-review"
+    },
+    {
+      "type": "GITHUB_SOURCE",
+      "repo": "acme/agent-assets",
+      "ref": "v1.2.0"
+    },
+    {
+      "type": "PLUGIN_REFERENCE",
+      "name": "review-base",
+      "source": {
+        "type": "MARKETPLACE_SOURCE",
+        "marketplace": "acme-tools",
+        "plugin": "review-base",
+        "version": "^1.0.0"
+      }
+    }
+  ],
+  "$defs": {
+    "Name": {
+      "type": "string",
+      "description": "Portable kebab-case identifier used for primitives, plugins, and marketplaces.",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
+      "examples": [
+        "code-review"
+      ]
+    },
+    "VersionConstraint": {
+      "type": "string",
+      "description": "Human-authored version selector. Interpreters may support semver ranges, git refs, package versions, or exact revisions based on source type.",
+      "minLength": 1,
+      "examples": [
+        "^1.2.0"
+      ]
+    },
+    "ResolvedVersion": {
+      "type": "string",
+      "description": "Resolved version recorded by a lockfile. This may be a semver, tag, package version, or commit SHA.",
+      "minLength": 1,
+      "examples": [
+        "1.2.3"
+      ]
+    },
+    "RelativePath": {
+      "type": "string",
+      "description": "Repository-relative path. Absolute paths and parent traversal are intentionally rejected.",
+      "minLength": 1,
+      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.\\.(?:/|$))(?:\\.\\/)?\\S.*$",
+      "examples": [
+        "skills/code-review"
+      ]
+    },
+    "GitSha": {
+      "type": "string",
+      "description": "Exact git commit SHA.",
+      "minLength": 40,
+      "maxLength": 40,
+      "pattern": "^[A-Fa-f0-9]{40}$",
+      "examples": [
+        "0123456789abcdef0123456789abcdef01234567"
+      ]
+    },
+    "Digest": {
+      "type": "string",
+      "description": "Content digest for a resolved source or primitive.",
+      "pattern": "^sha256:[A-Fa-f0-9]{64}$",
+      "examples": [
+        "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+      ]
+    },
+    "StringMap": {
+      "type": "object",
+      "description": "Small extension map for human-facing metadata. This is intentionally not interpreted by the core graph.",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "examples": [
+        {
+          "owner": "platform-team"
+        }
+      ]
+    },
+    "LocalSource": {
+      "type": "object",
+      "description": "A source rooted at a local path or a path relative to the containing marketplace.",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "LOCAL_SOURCE"
+          ],
+          "examples": [
+            "LOCAL_SOURCE"
+          ]
+        },
+        "path": {
+          "$ref": "#/$defs/RelativePath"
+        }
+      },
+      "required": [
+        "type",
+        "path"
+      ],
+      "additionalProperties": false,
+      "examples": [
+        {
+          "type": "LOCAL_SOURCE",
+          "path": "./plugins/review-pack"
+        }
+      ]
+    },
+    "GitHubSource": {
+      "type": "object",
+      "description": "A GitHub repository source.",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "GITHUB_SOURCE"
+          ],
+          "examples": [
+            "GITHUB_SOURCE"
+          ]
+        },
+        "repo": {
+          "type": "string",
+          "description": "GitHub repository in owner/repo form.",
+          "minLength": 3,
+          "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
+          "examples": [
+            "acme/agent-assets"
+          ]
+        },
+        "ref": {
+          "type": "string",
+          "description": "Branch, tag, or named ref.",
+          "minLength": 1,
+          "examples": [
+            "v1.2.0"
+          ]
+        },
+        "sha": {
+          "$ref": "#/$defs/GitSha"
+        }
+      },
+      "required": [
+        "type",
+        "repo"
+      ],
+      "additionalProperties": false,
+      "examples": [
+        {
+          "type": "GITHUB_SOURCE",
+          "repo": "acme/agent-assets",
+          "ref": "v1.2.0"
+        }
+      ]
+    },
+    "GitSource": {
+      "type": "object",
+      "description": "A generic git repository source.",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "GIT_SOURCE"
+          ],
+          "examples": [
+            "GIT_SOURCE"
+          ]
+        },
+        "url": {
+          "type": "string",
+          "description": "Git repository URL or SSH shorthand.",
+          "minLength": 1,
+          "examples": [
+            "https://git.example.com/acme/agent-assets.git"
+          ]
+        },
+        "ref": {
+          "type": "string",
+          "description": "Branch, tag, or named ref.",
+          "minLength": 1,
+          "examples": [
+            "main"
+          ]
+        },
+        "sha": {
+          "$ref": "#/$defs/GitSha"
+        }
+      },
+      "required": [
+        "type",
+        "url"
+      ],
+      "additionalProperties": false,
+      "examples": [
+        {
+          "type": "GIT_SOURCE",
+          "url": "https://git.example.com/acme/agent-assets.git",
+          "ref": "main"
+        }
+      ]
+    },
+    "GitSubdirSource": {
+      "type": "object",
+      "description": "A plugin or primitive rooted in a subdirectory of a git repository.",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "GIT_SUBDIR_SOURCE"
+          ],
+          "examples": [
+            "GIT_SUBDIR_SOURCE"
+          ]
+        },
+        "url": {
+          "type": "string",
+          "description": "Git repository URL, GitHub owner/repo shorthand, or SSH shorthand.",
+          "minLength": 1,
+          "examples": [
+            "acme/monorepo"
+          ]
+        },
+        "path": {
+          "$ref": "#/$defs/RelativePath"
+        },
+        "ref": {
+          "type": "string",
+          "description": "Branch, tag, or named ref.",
+          "minLength": 1,
+          "examples": [
+            "stable"
+          ]
+        },
+        "sha": {
+          "$ref": "#/$defs/GitSha"
+        }
+      },
+      "required": [
+        "type",
+        "url",
+        "path"
+      ],
+      "additionalProperties": false,
+      "examples": [
+        {
+          "type": "GIT_SUBDIR_SOURCE",
+          "url": "acme/monorepo",
+          "path": "tools/review-plugin",
+          "ref": "stable"
+        }
+      ]
+    },
+    "MarketplaceSource": {
+      "type": "object",
+      "description": "A plugin resolved from a named marketplace.",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "MARKETPLACE_SOURCE"
+          ],
+          "examples": [
+            "MARKETPLACE_SOURCE"
+          ]
+        },
+        "marketplace": {
+          "$ref": "#/$defs/Name"
+        },
+        "plugin": {
+          "$ref": "#/$defs/Name"
+        },
+        "version": {
+          "$ref": "#/$defs/VersionConstraint"
+        }
+      },
+      "required": [
+        "type",
+        "marketplace",
+        "plugin"
+      ],
+      "additionalProperties": false,
+      "examples": [
+        {
+          "type": "MARKETPLACE_SOURCE",
+          "marketplace": "acme-tools",
+          "plugin": "review-base",
+          "version": "^1.0.0"
+        }
+      ]
+    },
+    "SourceReference": {
+      "description": "Where a plugin or primitive should be resolved from before projection into a provider-specific harness.",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/LocalSource"
+        },
+        {
+          "$ref": "#/$defs/GitHubSource"
+        },
+        {
+          "$ref": "#/$defs/GitSource"
+        },
+        {
+          "$ref": "#/$defs/GitSubdirSource"
+        },
+        {
+          "$ref": "#/$defs/MarketplaceSource"
+        }
+      ],
+      "examples": [
+        {
+          "type": "GITHUB_SOURCE",
+          "repo": "acme/agent-assets",
+          "ref": "v1.2.0"
+        }
+      ]
+    },
+    "PrimitiveDependency": {
+      "description": "Reference to another first-class primitive. Used for graph edges below a plugin without introducing a generic resource shape.",
+      "oneOf": [
+        {
+          "$ref": "./skill.schema.json"
+        },
+        {
+          "$ref": "./agent.schema.json"
+        },
+        {
+          "$ref": "./instruction.schema.json"
+        },
+        {
+          "$ref": "./hook.schema.json"
+        }
+      ],
+      "examples": [
+        {
+          "type": "INSTRUCTION",
+          "source": {
+            "type": "LOCAL_SOURCE",
+            "path": "./"
+          },
+          "path": "instructions/type-safety.md",
+          "name": "type-safety"
+        }
+      ]
+    },
+    "PluginReference": {
+      "type": "object",
+      "description": "Reference to a plugin without embedding its primitives.",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "PLUGIN_REFERENCE"
+          ],
+          "examples": [
+            "PLUGIN_REFERENCE"
+          ]
+        },
+        "name": {
+          "$ref": "#/$defs/Name"
+        },
+        "source": {
+          "$ref": "#/$defs/SourceReference"
+        },
+        "version": {
+          "$ref": "#/$defs/VersionConstraint"
+        },
+        "integrity": {
+          "$ref": "#/$defs/Digest"
+        }
+      },
+      "required": [
+        "type",
+        "name",
+        "source"
+      ],
+      "additionalProperties": false,
+      "examples": [
+        {
+          "type": "PLUGIN_REFERENCE",
+          "name": "review-base",
+          "source": {
+            "type": "MARKETPLACE_SOURCE",
+            "marketplace": "acme-tools",
+            "plugin": "review-base"
+          },
+          "version": "^1.0.0"
+        }
+      ]
+    },
+    "Owner": {
+      "type": "object",
+      "description": "Marketplace owner.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Owner display name.",
+          "minLength": 1,
+          "examples": [
+            "Platform Team"
+          ]
+        },
+        "email": {
+          "type": "string",
+          "description": "Owner contact email.",
+          "format": "email",
+          "examples": [
+            "platform@example.com"
+          ]
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false,
+      "examples": [
+        {
+          "name": "Platform Team",
+          "email": "platform@example.com"
+        }
+      ]
+    },
+    "ManagementPolicy": {
+      "type": "object",
+      "description": "Marketplace-level distribution posture. Enforcement remains a harness or administrator concern.",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "MANAGEMENT_POLICY"
+          ],
+          "examples": [
+            "MANAGEMENT_POLICY"
+          ]
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "OPEN",
+            "CURATED",
+            "MANAGED"
+          ],
+          "examples": [
+            "MANAGED"
+          ]
+        },
+        "allowExternalMarketplaces": {
+          "type": "array",
+          "description": "Named marketplaces that may satisfy plugin or primitive references.",
+          "items": {
+            "$ref": "#/$defs/Name"
+          },
+          "examples": [
+            [
+              "shared-tools"
+            ]
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "mode"
+      ],
+      "additionalProperties": false,
+      "examples": [
+        {
+          "type": "MANAGEMENT_POLICY",
+          "mode": "MANAGED",
+          "allowExternalMarketplaces": [
+            "shared-tools"
+          ]
+        }
+      ]
+    },
+    "PluginEntry": {
+      "type": "object",
+      "description": "Marketplace catalog entry for one plugin.",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "PLUGIN_ENTRY"
+          ],
+          "examples": [
+            "PLUGIN_ENTRY"
+          ]
+        },
+        "name": {
+          "$ref": "#/$defs/Name"
+        },
+        "plugin": {
+          "$ref": "#/$defs/PluginReference"
+        },
+        "description": {
+          "type": "string",
+          "description": "Catalog description.",
+          "minLength": 1,
+          "examples": [
+            "Composable review assets."
+          ]
+        },
+        "tags": {
+          "type": "array",
+          "description": "Search and grouping tags.",
+          "items": {
+            "$ref": "#/$defs/Name"
+          },
+          "examples": [
+            [
+              "review",
+              "quality"
+            ]
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "name",
+        "plugin"
+      ],
+      "additionalProperties": false,
+      "examples": [
+        {
+          "type": "PLUGIN_ENTRY",
+          "name": "review-stack",
+          "plugin": {
+            "type": "PLUGIN_REFERENCE",
+            "name": "review-stack",
+            "source": {
+              "type": "LOCAL_SOURCE",
+              "path": "./plugins/review-stack"
+            },
+            "version": "0.1.0"
+          },
+          "tags": [
+            "review"
+          ]
+        }
+      ]
+    },
+    "ExternalMarketplace": {
+      "type": "object",
+      "description": "Named marketplace repository that may satisfy MARKETPLACE_SOURCE references.",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "EXTERNAL_MARKETPLACE"
+          ],
+          "examples": [
+            "EXTERNAL_MARKETPLACE"
+          ]
+        },
+        "name": {
+          "$ref": "#/$defs/Name"
+        },
+        "source": {
+          "$ref": "#/$defs/SourceReference"
+        }
+      },
+      "required": [
+        "type",
+        "name",
+        "source"
+      ],
+      "additionalProperties": false,
+      "examples": [
+        {
+          "type": "EXTERNAL_MARKETPLACE",
+          "name": "shared-tools",
+          "source": {
+            "type": "GITHUB_SOURCE",
+            "repo": "acme/shared-tools",
+            "ref": "v1.2.0"
+          }
+        }
+      ]
+    },
+    "Marketplace": {
+      "type": "object",
+      "description": "Catalog of plugins and optional standalone primitive sets. A marketplace can mix local and remote references.",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "MARKETPLACE"
+          ],
+          "examples": [
+            "MARKETPLACE"
+          ]
+        },
+        "schemaVersion": {
+          "type": "integer",
+          "enum": [
+            1
+          ],
+          "examples": [
+            1
+          ]
+        },
+        "name": {
+          "$ref": "#/$defs/Name"
+        },
+        "owner": {
+          "$ref": "#/$defs/Owner"
+        },
+        "description": {
+          "type": "string",
+          "description": "Marketplace description.",
+          "minLength": 1,
+          "examples": [
+            "Approved agent assets for product engineering."
+          ]
+        },
+        "management": {
+          "$ref": "#/$defs/ManagementPolicy"
+        },
+        "externalMarketplaces": {
+          "type": "array",
+          "description": "Named external marketplace repositories available to imports and MARKETPLACE_SOURCE references.",
+          "items": {
+            "$ref": "#/$defs/ExternalMarketplace"
+          },
+          "examples": [
+            [
+              {
+                "type": "EXTERNAL_MARKETPLACE",
+                "name": "shared-tools",
+                "source": {
+                  "type": "GITHUB_SOURCE",
+                  "repo": "acme/shared-tools",
+                  "ref": "v1.2.0"
+                }
+              }
+            ]
+          ]
+        },
+        "plugins": {
+          "type": "array",
+          "description": "Plugin entries exposed by this marketplace.",
+          "items": {
+            "$ref": "#/$defs/PluginEntry"
+          },
+          "examples": [
+            [
+              {
+                "type": "PLUGIN_ENTRY",
+                "name": "review-stack",
+                "plugin": {
+                  "type": "PLUGIN_REFERENCE",
+                  "name": "review-stack",
+                  "source": {
+                    "type": "LOCAL_SOURCE",
+                    "path": "./plugins/review-stack"
+                  }
+                }
+              }
+            ]
+          ]
+        },
+        "skills": {
+          "type": "array",
+          "description": "Standalone skill primitives exposed by this marketplace.",
+          "items": {
+            "$ref": "./skill.schema.json"
+          },
+          "examples": [
+            [
+              {
+                "type": "SKILL",
+                "source": {
+                  "type": "GITHUB_SOURCE",
+                  "repo": "acme/shared-skills",
+                  "ref": "v1.4.0"
+                },
+                "path": "skills/code-review",
+                "name": "code-review"
+              }
+            ]
+          ]
+        },
+        "agents": {
+          "type": "array",
+          "description": "Standalone agent primitives exposed by this marketplace.",
+          "items": {
+            "$ref": "./agent.schema.json"
+          },
+          "examples": [
+            [
+              {
+                "type": "AGENT",
+                "source": {
+                  "type": "LOCAL_SOURCE",
+                  "path": "./"
+                },
+                "path": "agents/reviewer.md",
+                "name": "reviewer"
+              }
+            ]
+          ]
+        },
+        "instructions": {
+          "type": "array",
+          "description": "Standalone instruction primitives exposed by this marketplace.",
+          "items": {
+            "$ref": "./instruction.schema.json"
+          },
+          "examples": [
+            [
+              {
+                "type": "INSTRUCTION",
+                "source": {
+                  "type": "LOCAL_SOURCE",
+                  "path": "./"
+                },
+                "path": "instructions/type-safety.md",
+                "name": "type-safety"
+              }
+            ]
+          ]
+        },
+        "hooks": {
+          "type": "array",
+          "description": "Standalone hook primitives exposed by this marketplace.",
+          "items": {
+            "$ref": "./hook.schema.json"
+          },
+          "examples": [
+            [
+              {
+                "type": "HOOK",
+                "source": {
+                  "type": "LOCAL_SOURCE",
+                  "path": "./"
+                },
+                "path": "hooks/evidence-report.json",
+                "name": "evidence-report"
+              }
+            ]
+          ]
+        },
+        "metadata": {
+          "$ref": "#/$defs/StringMap"
+        }
+      },
+      "required": [
+        "type",
+        "schemaVersion",
+        "name",
+        "owner",
+        "plugins"
+      ],
+      "additionalProperties": false,
+      "examples": [
+        {
+          "type": "MARKETPLACE",
+          "schemaVersion": 1,
+          "name": "acme-tools",
+          "owner": {
+            "name": "Platform Team"
+          },
+          "management": {
+            "type": "MANAGEMENT_POLICY",
+            "mode": "MANAGED",
+            "allowExternalMarketplaces": [
+              "shared-tools"
+            ]
+          },
+          "externalMarketplaces": [
+            {
+              "type": "EXTERNAL_MARKETPLACE",
+              "name": "shared-tools",
+              "source": {
+                "type": "GITHUB_SOURCE",
+                "repo": "acme/shared-tools",
+                "ref": "v1.2.0"
+              }
+            }
+          ],
+          "plugins": [
+            {
+              "type": "PLUGIN_ENTRY",
+              "name": "review-stack",
+              "plugin": {
+                "type": "PLUGIN_REFERENCE",
+                "name": "review-stack",
+                "source": {
+                  "type": "LOCAL_SOURCE",
+                  "path": "./plugins/review-stack"
+                }
+              }
+            }
+          ],
+          "skills": [
+            {
+              "type": "SKILL",
+              "source": {
+                "type": "GITHUB_SOURCE",
+                "repo": "acme/shared-skills",
+                "ref": "v1.4.0"
+              },
+              "path": "skills/code-review",
+              "name": "code-review"
+            }
+          ]
+        }
+      ]
+    },
+    "MarketplaceLockRoot": {
+      "type": "object",
+      "description": "Root marker for a marketplace-level lockfile.",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "MARKETPLACE_LOCK_ROOT"
+          ],
+          "examples": [
+            "MARKETPLACE_LOCK_ROOT"
+          ]
+        },
+        "name": {
+          "$ref": "#/$defs/Name"
+        },
+        "source": {
+          "$ref": "#/$defs/LocalSource"
+        }
+      },
+      "required": [
+        "type",
+        "name",
+        "source"
+      ],
+      "additionalProperties": false,
+      "examples": [
+        {
+          "type": "MARKETPLACE_LOCK_ROOT",
+          "name": "acme-tools",
+          "source": {
+            "type": "LOCAL_SOURCE",
+            "path": "./adaptable.marketplace.json"
+          }
+        }
+      ]
+    },
+    "LockedEntry": {
+      "type": "object",
+      "description": "Resolved graph node recorded after source resolution.",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "LOCKED_PLUGIN",
+            "LOCKED_SKILL",
+            "LOCKED_AGENT",
+            "LOCKED_INSTRUCTION",
+            "LOCKED_HOOK"
+          ],
+          "examples": [
+            "LOCKED_SKILL"
+          ]
+        },
+        "target": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/PluginReference"
+            },
+            {
+              "$ref": "#/$defs/PrimitiveDependency"
+            }
+          ],
+          "examples": [
+            {
+              "type": "SKILL",
+              "source": {
+                "type": "LOCAL_SOURCE",
+                "path": "./"
+              },
+              "path": "skills/code-review",
+              "name": "code-review"
+            }
+          ]
+        },
+        "resolvedSource": {
+          "$ref": "#/$defs/SourceReference"
+        },
+        "version": {
+          "$ref": "#/$defs/ResolvedVersion"
+        },
+        "integrity": {
+          "$ref": "#/$defs/Digest"
+        },
+        "dependsOn": {
+          "type": "array",
+          "description": "Names of locked entries this node depends on after graph resolution.",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "examples": [
+              "plugin:review-base"
+            ]
+          },
+          "examples": [
+            [
+              "plugin:review-base"
+            ]
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "target",
+        "resolvedSource",
+        "integrity"
+      ],
+      "additionalProperties": false,
+      "examples": [
+        {
+          "type": "LOCKED_SKILL",
+          "target": {
+            "type": "SKILL",
+            "source": {
+              "type": "GITHUB_SOURCE",
+              "repo": "acme/shared-skills",
+              "ref": "v1.4.0"
+            },
+            "path": "skills/code-review",
+            "name": "code-review"
+          },
+          "resolvedSource": {
+            "type": "GITHUB_SOURCE",
+            "repo": "acme/shared-skills",
+            "ref": "v1.4.0",
+            "sha": "0123456789abcdef0123456789abcdef01234567"
+          },
+          "version": "1.4.0",
+          "integrity": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        }
+      ]
+    },
+    "Lockfile": {
+      "type": "object",
+      "description": "Resolved reference graph lockfile. It records exact sources and content digests without changing the authored plugin or marketplace contracts.",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "LOCKFILE"
+          ],
+          "examples": [
+            "LOCKFILE"
+          ]
+        },
+        "schemaVersion": {
+          "type": "integer",
+          "enum": [
+            1
+          ],
+          "examples": [
+            1
+          ]
+        },
+        "generatedAt": {
+          "type": "string",
+          "description": "Lock generation timestamp.",
+          "format": "date-time",
+          "examples": [
+            "2026-05-20T12:00:00Z"
+          ]
+        },
+        "root": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/PluginReference"
+            },
+            {
+              "$ref": "#/$defs/MarketplaceLockRoot"
+            }
+          ]
+        },
+        "entries": {
+          "type": "array",
+          "description": "Resolved plugin and primitive nodes.",
+          "items": {
+            "$ref": "#/$defs/LockedEntry"
+          },
+          "examples": [
+            [
+              {
+                "type": "LOCKED_PLUGIN",
+                "target": {
+                  "type": "PLUGIN_REFERENCE",
+                  "name": "review-stack",
+                  "source": {
+                    "type": "LOCAL_SOURCE",
+                    "path": "./plugins/review-stack"
+                  }
+                },
+                "resolvedSource": {
+                  "type": "LOCAL_SOURCE",
+                  "path": "./plugins/review-stack"
+                },
+                "version": "0.1.0",
+                "integrity": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+              }
+            ]
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "schemaVersion",
+        "generatedAt",
+        "root",
+        "entries"
+      ],
+      "additionalProperties": false,
+      "examples": [
+        {
+          "type": "LOCKFILE",
+          "schemaVersion": 1,
+          "generatedAt": "2026-05-20T12:00:00Z",
+          "root": {
+            "type": "PLUGIN_REFERENCE",
+            "name": "review-stack",
+            "source": {
+              "type": "LOCAL_SOURCE",
+              "path": "./plugins/review-stack"
+            }
+          },
+          "entries": [
+            {
+              "type": "LOCKED_PLUGIN",
+              "target": {
+                "type": "PLUGIN_REFERENCE",
+                "name": "review-stack",
+                "source": {
+                  "type": "LOCAL_SOURCE",
+                  "path": "./plugins/review-stack"
+                }
+              },
+              "resolvedSource": {
+                "type": "LOCAL_SOURCE",
+                "path": "./plugins/review-stack"
+              },
+              "version": "0.1.0",
+              "integrity": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

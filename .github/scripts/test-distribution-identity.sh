@@ -9,6 +9,17 @@ configured_name="$(sed -n 's/^distributionName=//p' gradle.properties)"
   printf 'error: gradle.properties must define distributionName exactly once\n' >&2
   exit 1
 }
+expected_name=projeKtor
+[[ "$configured_name" == "$expected_name" ]] || {
+  printf 'error: configured distribution name must be %s; found %s\n' "$expected_name" "$configured_name" >&2
+  exit 1
+}
+
+action_name="$(sed -n 's/^name: //p' action.yml)"
+[[ "$action_name" == "$configured_name" ]] || {
+  printf 'error: action name must match distributionName exactly; found %s\n' "$action_name" >&2
+  exit 1
+}
 
 proof_name=rename-proof
 proof_version=v0.0.0

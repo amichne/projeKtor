@@ -45,8 +45,10 @@ jobs:
           ./gradlew check --no-daemon
           .github/scripts/test-dependency-versions.sh
           .github/scripts/test-distribution-identity.sh
+          .github/scripts/test-schema-contracts.sh
           .github/scripts/test-release-asset-verifier.sh
           .github/scripts/test-release-workflow-contract.sh
+          .github/scripts/test-pages-site.sh
           .github/scripts/test-repository-boundary.sh
           .github/scripts/test-source-projection-action.sh
           git diff --check

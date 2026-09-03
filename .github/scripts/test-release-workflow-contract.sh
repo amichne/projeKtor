@@ -36,13 +36,14 @@ require_order() {
 
 ci=.github/workflows/ci.yml
 release=.github/workflows/release.yml
+pages=.github/workflows/pages.yml
 
-for path in "$ci" "$release" action.yml .github/scripts/verify-release-assets.sh .github/scripts/verify-release-state.sh; do
+for path in "$ci" "$release" "$pages" action.yml .github/scripts/verify-release-assets.sh .github/scripts/verify-release-state.sh; do
   [[ -f "$path" ]] || die "required release path is missing: $path"
 done
 
 [[ ! -e .github/workflows/distribute-intelligence.yml ]] || die 'the superseded distribution workflow must be removed'
-[[ ! -e .github/workflows/docs.yml ]] || die 'the unrelated documentation workflow must be removed'
+[[ ! -e .github/workflows/docs.yml ]] || die 'the superseded documentation workflow must remain removed'
 
 for workflow in "$ci" "$release"; do
   ruby -e 'require "yaml"; YAML.safe_load(File.read(ARGV.fetch(0)), aliases: true)' "$workflow" || \
@@ -52,12 +53,22 @@ for workflow in "$ci" "$release"; do
   require_literal "$workflow" 'gradle/actions/setup-gradle@'
   require_literal "$workflow" './gradlew check --no-daemon'
   require_literal "$workflow" '.github/scripts/test-distribution-identity.sh'
+  require_literal "$workflow" '.github/scripts/test-schema-contracts.sh'
+  require_literal "$workflow" '.github/scripts/test-pages-site.sh'
   require_literal "$workflow" '.github/scripts/test-repository-boundary.sh'
   reject_literal "$workflow" 'amichne/'
   reject_literal "$workflow" 'github.com/'
   reject_literal "$workflow" 'Homebrew'
   reject_literal "$workflow" 'homebrew'
 done
+
+ruby -e 'require "yaml"; YAML.safe_load(File.read(ARGV.fetch(0)), aliases: true)' "$pages" || \
+  die "$pages is not valid YAML"
+require_literal "$pages" '.github/scripts/test-schema-contracts.sh'
+require_literal "$pages" '.github/scripts/test-pages-site.sh'
+require_literal "$pages" 'actions/configure-pages@'
+require_literal "$pages" 'actions/upload-pages-artifact@'
+require_literal "$pages" 'actions/deploy-pages@'
 
 require_literal "$ci" 'uses: ./'
 require_literal "$ci" 'ubuntu-latest'

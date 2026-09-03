@@ -4,6 +4,9 @@
   "name": "fixture-plugin",
   "version": "0.1.0",
   "description": "Minimal source-projection action fixture.",
+  "skills": [],
+  "agents": [],
+  "instructions": [],
   "hooks": [
     {
       "type": "HOOK",

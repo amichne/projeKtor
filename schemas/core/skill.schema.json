@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "skill.schema.json",
+  "title": "SKILL",
+  "description": "A directory-backed agent skill such as an Agent Skills `SKILL.md` bundle.",
+  "type": "object",
+  "properties": {
+    "type": {
+      "type": "string",
+      "enum": [
+        "SKILL"
+      ],
+      "examples": [
+        "SKILL"
+      ]
+    },
+    "source": {
+      "$ref": "./reference-definitions.schema.json#/$defs/SourceReference"
+    },
+    "path": {
+      "$ref": "./reference-definitions.schema.json#/$defs/RelativePath"
+    },
+    "name": {
+      "$ref": "./reference-definitions.schema.json#/$defs/Name"
+    },
+    "version": {
+      "$ref": "./reference-definitions.schema.json#/$defs/VersionConstraint"
+    },
+    "integrity": {
+      "$ref": "./reference-definitions.schema.json#/$defs/Digest"
+    },
+    "expectedResources": {
+      "type": "array",
+      "description": "Files expected to exist relative to the skill directory.",
+      "items": {
+        "$ref": "./reference-definitions.schema.json#/$defs/RelativePath"
+      },
+      "examples": [
+        [
+          "SKILL.md",
+          "references/checklist.md"
+        ]
+      ]
+    },
+    "dependsOn": {
+      "type": "array",
+      "description": "Other primitives required by this skill.",
+      "items": {
+        "$ref": "./reference-definitions.schema.json#/$defs/PrimitiveDependency"
+      },
+      "examples": [
+        [
+          {
+            "type": "INSTRUCTION",
+            "source": {
+              "type": "LOCAL_SOURCE",
+              "path": "./"
+            },
+            "path": "instructions/type-safety.md",
+            "name": "type-safety"
+          }
+        ]
+      ]
+    }
+  },
+  "required": [
+    "type",
+    "source",
+    "path"
+  ],
+  "additionalProperties": false,
+  "examples": [
+    {
+      "type": "SKILL",
+      "source": {
+        "type": "LOCAL_SOURCE",
+        "path": "./"
+      },
+      "path": "skills/code-review",
+      "name": "code-review",
+      "expectedResources": [
+        "SKILL.md"
+      ]
+    }
+  ]
+}

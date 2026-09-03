@@ -13,15 +13,19 @@ is_required_path() {
   case "$1" in
     .github/actions/project/run.sh | \
       .github/fixtures/source-projection/source/* | \
+      .github/scripts/build-pages-site.sh | \
       .github/scripts/test-dependency-versions.sh | \
       .github/scripts/test-distribution-identity.sh | \
+      .github/scripts/test-pages-site.sh | \
       .github/scripts/test-release-asset-verifier.sh | \
       .github/scripts/test-release-workflow-contract.sh | \
       .github/scripts/test-repository-boundary.sh | \
+      .github/scripts/test-schema-contracts.sh | \
       .github/scripts/test-source-projection-action.sh | \
       .github/scripts/verify-release-assets.sh | \
       .github/scripts/verify-release-state.sh | \
       .github/workflows/ci.yml | \
+      .github/workflows/pages.yml | \
       .github/workflows/release.yml | \
       .gitignore | \
       action.yml | \
@@ -29,12 +33,14 @@ is_required_path() {
       cli/build.gradle.kts | \
       cli/src/main/kotlin/* | \
       cli/src/test/kotlin/* | \
+      docs/* | \
       gradle.properties | \
       gradle/wrapper/gradle-wrapper.jar | \
       gradle/wrapper/gradle-wrapper.properties | \
       gradlew | \
       LICENSE | \
       README.md | \
+      schemas/* | \
       settings.gradle.kts)
       return 0
       ;;
@@ -96,7 +102,7 @@ if publication_file_contains "$workstation_root"; then
   die 'publication files must not contain workstation-specific paths'
 fi
 
-for path in action.yml .github/actions/project/run.sh .github/workflows/ci.yml .github/workflows/release.yml; do
+for path in action.yml .github/actions/project/run.sh .github/workflows/ci.yml .github/workflows/pages.yml .github/workflows/release.yml; do
   [[ -f "$path" ]] || die "required publication path is missing: $path"
 done
 

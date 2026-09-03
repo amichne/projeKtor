@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Use, validate, and commit projections produced by {{PROJECT_NAME}}.">
+  <title>{{PROJECT_NAME}} — GitHub Action</title>
+  <style>
+    :root { color-scheme: light dark; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    body { max-width: 54rem; margin: 0 auto; padding: 3rem 1.25rem 5rem; line-height: 1.6; }
+    header { border-bottom: 1px solid color-mix(in srgb, currentColor 22%, transparent); margin-bottom: 2.5rem; }
+    h1 { font-size: clamp(2.25rem, 8vw, 4.5rem); letter-spacing: -.07em; margin: 0; }
+    h2 { margin-top: 2.75rem; }
+    nav { display: flex; flex-wrap: wrap; gap: .9rem; margin: 1rem 0 1.5rem; }
+    a { color: #6d7cff; text-underline-offset: .2em; }
+    pre { overflow-x: auto; padding: 1rem; border: 1px solid color-mix(in srgb, currentColor 22%, transparent); border-radius: .5rem; }
+    code { font-family: inherit; font-size: .9em; }
+    .lede { font-size: 1.08rem; max-width: 44rem; }
+    .schemas { columns: 2 18rem; padding-left: 1.25rem; }
+    footer { margin-top: 3rem; opacity: .72; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>{{PROJECT_NAME}}</h1>
+    <p class="lede">A composite GitHub Action that validates one provider-neutral agent-tooling source tree and projects it into Codex or GitHub Copilot layout.</p>
+    <nav aria-label="Guide">
+      <a href="#use">Use</a>
+      <a href="#check">Check</a>
+      <a href="#commit">Commit projections</a>
+      <a href="#schemas">JSON Schema</a>
+    </nav>
+  </header>
+
+  <main>
+    <section id="use">
+      <h2>Use the Action</h2>
+      <p>Pin the Action commit and projector release in production. The output directory is created outside the checked-out source tree by default.</p>
+      <pre><code>- name: Project agent tooling
+  id: projection
+  uses: OWNER/REPOSITORY@FULL_COMMIT_SHA
+  with:
+    source: .
+    harness: codex
+    version: vX.Y.Z
+
+- name: Read the projection
+  run: find "${{ steps.projection.outputs.projection-path }}" -type f</code></pre>
+    </section>
+
+    <section id="check">
+      <h2>Check a source tree</h2>
+      <p>From this repository root, build the launcher, verify the restored schema contracts, and exercise the complete Action boundary.</p>
+      <pre><code>./gradlew check installDevelopmentCli --no-daemon
+.github/scripts/test-schema-contracts.sh
+.github/scripts/test-source-projection-action.sh</code></pre>
+    </section>
+
+    <section id="commit">
+      <h2>Commit projected contents</h2>
+      <p>Project into runner-temporary storage, replace the tracked destination, and commit only when the generated tree changed.</p>
+      <pre><code>permissions:
+  contents: write
+
+steps:
+  - uses: actions/checkout@FULL_COMMIT_SHA
+  - name: Project source
+    id: projection
+    uses: OWNER/REPOSITORY@FULL_COMMIT_SHA
+    with:
+      source: .
+      harness: codex
+      output: ${{ runner.temp }}/projection
+      version: vX.Y.Z
+
+  - name: Commit changed projection
+    shell: bash
+    run: |
+      set -euo pipefail
+      rm -rf generated/codex
+      mkdir -p generated/codex
+      cp -R "${{ steps.projection.outputs.projection-path }}/." generated/codex/
+      git add generated/codex
+      if git diff --cached --quiet; then
+        exit 0
+      fi
+      git config user.name "github-actions[bot]"
+      git config user.email "github-actions[bot]@users.noreply.github.com"
+      git commit -m "chore: refresh projected agent tooling"
+      git push</code></pre>
+    </section>
+
+    <section id="schemas">
+      <h2>JSON Schema contracts</h2>
+      <p>The published files below are byte-identical copies of the checked-in schema tree. The provider-neutral schemas own source construction; adapter and marketplace schemas describe supported projected output.</p>
+      <ul class="schemas">
+        <li><a href="schemas/marketplace/adaptable.schema.json">Adaptable marketplace</a></li>
+        <li><a href="schemas/core/plugin.schema.json">Plugin</a></li>
+        <li><a href="schemas/core/skill.schema.json">Skill</a></li>
+        <li><a href="schemas/core/agent.schema.json">Agent</a></li>
+        <li><a href="schemas/core/instruction.schema.json">Instruction</a></li>
+        <li><a href="schemas/core/hook.schema.json">Hook</a></li>
+        <li><a href="schemas/core/lock.schema.json">Resolution lock</a></li>
+        <li><a href="schemas/marketplace/codex.schema.json">Codex marketplace</a></li>
+        <li><a href="schemas/adapters/codex/plugin.schema.json">Codex plugin</a></li>
+        <li><a href="schemas/marketplace/github.schema.json">GitHub Copilot marketplace</a></li>
+        <li><a href="schemas/adapters/github/plugin.schema.json">GitHub Copilot plugin</a></li>
+      </ul>
+    </section>
+  </main>
+
+  <footer>Source → validate → project → validate → harness payload</footer>
+</body>
+</html>

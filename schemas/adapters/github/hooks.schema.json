@@ -1,0 +1,286 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "github-hooks.schema.json",
+  "title": "GitHub Copilot Hooks Configuration",
+  "description": "GitHub Copilot CLI and cloud agent hook configuration.",
+  "type": "object",
+  "required": [
+    "version",
+    "hooks"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema reference for editor autocomplete."
+    },
+    "version": {
+      "type": "integer",
+      "enum": [
+        1
+      ]
+    },
+    "disableAllHooks": {
+      "type": "boolean"
+    },
+    "hooks": {
+      "$ref": "#/$defs/hooks"
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "hooks": {
+      "type": "object",
+      "description": "Hook entries grouped by GitHub Copilot lifecycle event.",
+      "minProperties": 1,
+      "properties": {
+        "agentStop": {
+          "$ref": "#/$defs/entries"
+        },
+        "Stop": {
+          "$ref": "#/$defs/entries"
+        },
+        "errorOccurred": {
+          "$ref": "#/$defs/entries"
+        },
+        "ErrorOccurred": {
+          "$ref": "#/$defs/entries"
+        },
+        "notification": {
+          "$ref": "#/$defs/entries"
+        },
+        "Notification": {
+          "$ref": "#/$defs/entries"
+        },
+        "permissionRequest": {
+          "$ref": "#/$defs/entries"
+        },
+        "PermissionRequest": {
+          "$ref": "#/$defs/entries"
+        },
+        "postToolUse": {
+          "$ref": "#/$defs/entries"
+        },
+        "PostToolUse": {
+          "$ref": "#/$defs/entries"
+        },
+        "postToolUseFailure": {
+          "$ref": "#/$defs/entries"
+        },
+        "PostToolUseFailure": {
+          "$ref": "#/$defs/entries"
+        },
+        "preCompact": {
+          "$ref": "#/$defs/entries"
+        },
+        "PreCompact": {
+          "$ref": "#/$defs/entries"
+        },
+        "preToolUse": {
+          "$ref": "#/$defs/entries"
+        },
+        "PreToolUse": {
+          "$ref": "#/$defs/entries"
+        },
+        "sessionEnd": {
+          "$ref": "#/$defs/entries"
+        },
+        "SessionEnd": {
+          "$ref": "#/$defs/entries"
+        },
+        "sessionStart": {
+          "$ref": "#/$defs/entries"
+        },
+        "SessionStart": {
+          "$ref": "#/$defs/entries"
+        },
+        "subagentStart": {
+          "$ref": "#/$defs/entries"
+        },
+        "SubagentStart": {
+          "$ref": "#/$defs/entries"
+        },
+        "subagentStop": {
+          "$ref": "#/$defs/entries"
+        },
+        "SubagentStop": {
+          "$ref": "#/$defs/entries"
+        },
+        "userPromptSubmitted": {
+          "$ref": "#/$defs/entries"
+        },
+        "UserPromptSubmit": {
+          "$ref": "#/$defs/entries"
+        }
+      },
+      "additionalProperties": false
+    },
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/hookEntry"
+      }
+    },
+    "hookEntry": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/commandEntry"
+        },
+        {
+          "$ref": "#/$defs/httpEntry"
+        },
+        {
+          "$ref": "#/$defs/promptEntry"
+        }
+      ]
+    },
+    "commandEntry": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "anyOf": [
+        {
+          "required": [
+            "bash"
+          ]
+        },
+        {
+          "required": [
+            "powershell"
+          ]
+        },
+        {
+          "required": [
+            "command"
+          ]
+        }
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "command"
+          ]
+        },
+        "bash": {
+          "type": "string",
+          "minLength": 1
+        },
+        "powershell": {
+          "type": "string",
+          "minLength": 1
+        },
+        "command": {
+          "type": "string",
+          "minLength": 1
+        },
+        "cwd": {
+          "type": "string",
+          "minLength": 1
+        },
+        "env": {
+          "$ref": "#/$defs/stringMap"
+        },
+        "matcher": {
+          "type": "string"
+        },
+        "timeoutSec": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "httpEntry": {
+      "type": "object",
+      "required": [
+        "type",
+        "url"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "http"
+          ]
+        },
+        "url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "headers": {
+          "$ref": "#/$defs/stringMap"
+        },
+        "allowedEnvVars": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "matcher": {
+          "type": "string"
+        },
+        "timeoutSec": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "promptEntry": {
+      "type": "object",
+      "required": [
+        "type",
+        "prompt"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "prompt"
+          ]
+        },
+        "prompt": {
+          "type": "string",
+          "minLength": 1
+        },
+        "matcher": {
+          "type": "string"
+        },
+        "timeoutSec": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "stringMap": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1
+      },
+      "additionalProperties": {
+        "type": "string"
+      }
+    }
+  },
+  "examples": [
+    {
+      "$schema": "github-hooks.schema.json",
+      "version": 1,
+      "hooks": {
+        "preToolUse": [
+          {
+            "type": "command",
+            "bash": "./hooks/pre-tool-use.sh",
+            "timeoutSec": 30
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-name: Source Projection
+name: projeKtor
 description: Project one provider-neutral agent-tooling source tree into one harness-native payload.
 
 inputs:

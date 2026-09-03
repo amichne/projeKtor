@@ -46,7 +46,7 @@ development_cli="${repo_root}/.local/${distribution_name}/bin/${distribution_nam
 [[ -f "${fixture_root}/source/adaptable.marketplace.json" ]] || die "action fixture is missing"
 
 ruby -e 'require "yaml"; YAML.safe_load(File.read(ARGV.fetch(0)), aliases: true)' "$action_manifest"
-require_contains "$action_manifest" "name: Source Projection" "Action metadata must use a repository-neutral name"
+require_contains "$action_manifest" "name: ${distribution_name}" "Action metadata must match the centralized distribution identity"
 require_contains "$action_manifest" "using: composite" "Action must use the auditable composite runtime"
 require_contains "$action_manifest" "uses: actions/setup-java@" "Action must provision the released JVM runtime"
 require_contains "$action_manifest" "uses: actions/setup-python@" "Action must provision the release verifier runtime"

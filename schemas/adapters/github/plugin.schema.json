@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "github-plugin.schema.json",
+  "title": "GitHub Copilot Plugin Manifest",
+  "description": "GitHub Copilot CLI plugin.json projection.",
+  "type": "object",
+  "required": [
+    "name"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "name": {
+      "$ref": "../../marketplace/github.schema.json#/$defs/name"
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 1024
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "author": {
+      "$ref": "../../marketplace/github.schema.json#/$defs/person"
+    },
+    "homepage": {
+      "type": "string",
+      "format": "uri"
+    },
+    "repository": {
+      "type": "string",
+      "minLength": 1
+    },
+    "license": {
+      "type": "string",
+      "minLength": 1
+    },
+    "keywords": {
+      "$ref": "../../marketplace/github.schema.json#/$defs/stringList"
+    },
+    "category": {
+      "type": "string",
+      "minLength": 1
+    },
+    "tags": {
+      "$ref": "../../marketplace/github.schema.json#/$defs/stringList"
+    },
+    "commands": {
+      "$ref": "../../marketplace/github.schema.json#/$defs/pathOrPaths"
+    },
+    "agents": {
+      "$ref": "../../marketplace/github.schema.json#/$defs/pathOrPaths"
+    },
+    "skills": {
+      "$ref": "../../marketplace/github.schema.json#/$defs/pathOrPaths"
+    },
+    "hooks": {
+      "$ref": "../../marketplace/github.schema.json#/$defs/hooksReference"
+    },
+    "mcpServers": {
+      "$ref": "../../marketplace/github.schema.json#/$defs/pathArrayOrObject"
+    },
+    "lspServers": {
+      "$ref": "../../marketplace/github.schema.json#/$defs/pathArrayOrObject"
+    },
+    "extensions": {
+      "oneOf": [
+        {
+          "$ref": "../../marketplace/github.schema.json#/$defs/pathOrPaths"
+        },
+        {
+          "type": "object",
+          "required": [
+            "paths"
+          ],
+          "properties": {
+            "paths": {
+              "type": "array",
+              "items": {
+                "$ref": "../../marketplace/github.schema.json#/$defs/relativePath"
+              },
+              "minItems": 1,
+              "uniqueItems": true
+            },
+            "exclusive": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    }
+  },
+  "additionalProperties": false
+}

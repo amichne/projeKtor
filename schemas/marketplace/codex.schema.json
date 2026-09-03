@@ -1,0 +1,236 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "codex-marketplace.schema.json",
+  "title": "Codex Marketplace",
+  "description": "Codex-native marketplace manifest stored at `.agents/plugins/marketplace.json` on a hydrated Codex marketplace branch. This is an external runtime shape, so it intentionally uses Codex field names instead of the provider-neutral `type` discriminator model.",
+  "type": "object",
+  "required": [
+    "name",
+    "interface",
+    "plugins"
+  ],
+  "properties": {
+    "name": {
+      "description": "Marketplace identifier.",
+      "$ref": "#/$defs/name"
+    },
+    "interface": {
+      "description": "User-facing marketplace presentation metadata.",
+      "type": "object",
+      "required": [
+        "displayName"
+      ],
+      "properties": {
+        "displayName": {
+          "description": "Title shown for this marketplace.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "examples": [
+            "OpenAI Bundled"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "examples": [
+        {
+          "displayName": "OpenAI Bundled"
+        }
+      ]
+    },
+    "plugins": {
+      "description": "Ordered plugin entries. Codex renders plugins in this order.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/pluginEntry"
+      },
+      "examples": [
+        [
+          {
+            "name": "browser",
+            "source": {
+              "source": "local",
+              "path": "./.agents/plugins/browser"
+            },
+            "policy": {
+              "installation": "AVAILABLE",
+              "authentication": "ON_INSTALL"
+            },
+            "category": "Engineering"
+          }
+        ]
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "name": {
+      "type": "string",
+      "description": "Kebab-case marketplace or plugin identifier.",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
+      "examples": [
+        "browser"
+      ]
+    },
+    "pluginEntry": {
+      "description": "A Codex marketplace plugin entry.",
+      "type": "object",
+      "required": [
+        "name",
+        "source",
+        "policy",
+        "category"
+      ],
+      "properties": {
+        "name": {
+          "description": "Plugin identifier. It must match the target plugin directory name.",
+          "$ref": "#/$defs/name"
+        },
+        "source": {
+          "$ref": "#/$defs/localPluginSource"
+        },
+        "policy": {
+          "$ref": "#/$defs/pluginPolicy"
+        },
+        "category": {
+          "description": "Display category bucket.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "examples": [
+            "Engineering"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "examples": [
+        {
+          "name": "browser",
+          "source": {
+            "source": "local",
+            "path": "./.agents/plugins/browser"
+          },
+          "policy": {
+            "installation": "AVAILABLE",
+            "authentication": "ON_INSTALL"
+          },
+          "category": "Engineering"
+        }
+      ]
+    },
+    "localPluginSource": {
+      "description": "Plugin payload stored under the marketplace root.",
+      "type": "object",
+      "required": [
+        "source",
+        "path"
+      ],
+      "properties": {
+        "source": {
+          "description": "Codex source discriminator. The generated branch stores local plugin payloads.",
+          "type": "string",
+          "enum": [
+            "local"
+          ],
+          "examples": [
+            "local"
+          ]
+        },
+        "path": {
+          "description": "Repository-relative path to the local plugin payload. Generated Codex marketplace branches keep payloads under `.agents/plugins/<plugin>/` beside `marketplace.json`.",
+          "type": "string",
+          "pattern": "^\\./\\.agents/plugins/[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
+          "examples": [
+            "./.agents/plugins/browser"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "examples": [
+        {
+          "source": "local",
+          "path": "./.agents/plugins/browser"
+        }
+      ]
+    },
+    "pluginPolicy": {
+      "description": "Codex marketplace availability and authentication policy.",
+      "type": "object",
+      "required": [
+        "installation",
+        "authentication"
+      ],
+      "properties": {
+        "installation": {
+          "description": "Whether Codex can install this plugin from the marketplace.",
+          "type": "string",
+          "enum": [
+            "NOT_AVAILABLE",
+            "AVAILABLE",
+            "INSTALLED_BY_DEFAULT"
+          ],
+          "examples": [
+            "AVAILABLE"
+          ]
+        },
+        "authentication": {
+          "description": "When the plugin should request authentication.",
+          "type": "string",
+          "enum": [
+            "ON_INSTALL",
+            "ON_USE"
+          ],
+          "examples": [
+            "ON_INSTALL"
+          ]
+        },
+        "products": {
+          "description": "Optional product gating override. Omit unless the marketplace entry is intentionally product-scoped.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "uniqueItems": true,
+          "examples": [
+            [
+              "codex"
+            ]
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "examples": [
+        {
+          "installation": "AVAILABLE",
+          "authentication": "ON_INSTALL"
+        }
+      ]
+    }
+  },
+  "examples": [
+    {
+      "name": "openai-bundled",
+      "interface": {
+        "displayName": "OpenAI Bundled"
+      },
+      "plugins": [
+        {
+          "name": "browser",
+          "source": {
+            "source": "local",
+            "path": "./.agents/plugins/browser"
+          },
+          "policy": {
+            "installation": "AVAILABLE",
+            "authentication": "ON_INSTALL"
+          },
+          "category": "Engineering"
+        }
+      ]
+    }
+  ]
+}

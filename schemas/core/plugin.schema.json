@@ -1,0 +1,256 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "plugin.schema.json",
+  "title": "PLUGIN",
+  "description": "Composable plugin definition. It can extend other plugins and add local or remote primitive sets.",
+  "type": "object",
+  "properties": {
+    "type": {
+      "type": "string",
+      "enum": [
+        "PLUGIN"
+      ],
+      "examples": [
+        "PLUGIN"
+      ]
+    },
+    "schemaVersion": {
+      "type": "integer",
+      "enum": [
+        1
+      ],
+      "examples": [
+        1
+      ]
+    },
+    "name": {
+      "$ref": "./reference-definitions.schema.json#/$defs/Name"
+    },
+    "version": {
+      "$ref": "./reference-definitions.schema.json#/$defs/ResolvedVersion"
+    },
+    "description": {
+      "type": "string",
+      "description": "Short human-facing description.",
+      "minLength": 1,
+      "examples": [
+        "Review workflow assets composed from shared skills and hooks."
+      ]
+    },
+    "interface": {
+      "type": "object",
+      "description": "Provider-neutral plugin interface metadata copied into supported runtime adapters.",
+      "properties": {
+        "websiteURL": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://",
+          "description": "Public plugin or marketplace website URL."
+        },
+        "privacyPolicyURL": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://",
+          "description": "Public privacy policy URL."
+        },
+        "termsOfServiceURL": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://",
+          "description": "Public terms of service URL."
+        }
+      },
+      "additionalProperties": false,
+      "examples": [
+        {
+          "websiteURL": "https://github.com/acme/tools",
+          "privacyPolicyURL": "https://github.com/acme/tools",
+          "termsOfServiceURL": "https://github.com/acme/tools"
+        }
+      ]
+    },
+    "extends": {
+      "type": "array",
+      "description": "Plugins inherited before this plugin's own primitives are applied.",
+      "items": {
+        "$ref": "./reference-definitions.schema.json#/$defs/PluginReference"
+      },
+      "examples": [
+        [
+          {
+            "type": "PLUGIN_REFERENCE",
+            "name": "review-base",
+            "source": {
+              "type": "MARKETPLACE_SOURCE",
+              "marketplace": "acme-tools",
+              "plugin": "review-base"
+            },
+            "version": "^1.0.0"
+          }
+        ]
+      ]
+    },
+    "skills": {
+      "type": "array",
+      "description": "Skill primitives contributed by this plugin.",
+      "items": {
+        "$ref": "./skill.schema.json"
+      },
+      "examples": [
+        [
+          {
+            "type": "SKILL",
+            "source": {
+              "type": "LOCAL_SOURCE",
+              "path": "./"
+            },
+            "path": "skills/code-review",
+            "name": "code-review"
+          }
+        ]
+      ]
+    },
+    "agents": {
+      "type": "array",
+      "description": "Agent primitives contributed by this plugin.",
+      "items": {
+        "$ref": "./agent.schema.json"
+      },
+      "examples": [
+        [
+          {
+            "type": "AGENT",
+            "source": {
+              "type": "LOCAL_SOURCE",
+              "path": "./"
+            },
+            "path": "agents/reviewer.md",
+            "name": "reviewer"
+          }
+        ]
+      ]
+    },
+    "instructions": {
+      "type": "array",
+      "description": "Instruction primitives contributed by this plugin.",
+      "items": {
+        "$ref": "./instruction.schema.json"
+      },
+      "examples": [
+        [
+          {
+            "type": "INSTRUCTION",
+            "source": {
+              "type": "LOCAL_SOURCE",
+              "path": "./"
+            },
+            "path": "instructions/type-safety.md",
+            "name": "type-safety"
+          }
+        ]
+      ]
+    },
+    "hooks": {
+      "type": "array",
+      "description": "Hook primitives contributed by this plugin.",
+      "items": {
+        "$ref": "./hook.schema.json"
+      },
+      "examples": [
+        [
+          {
+            "type": "HOOK",
+            "source": {
+              "type": "LOCAL_SOURCE",
+              "path": "./"
+            },
+            "path": "hooks/evidence-report.json",
+            "name": "evidence-report"
+          }
+        ]
+      ]
+    },
+    "metadata": {
+      "$ref": "./reference-definitions.schema.json#/$defs/StringMap"
+    }
+  },
+  "required": [
+    "type",
+    "schemaVersion",
+    "name",
+    "skills",
+    "agents",
+    "instructions",
+    "hooks"
+  ],
+  "additionalProperties": false,
+  "examples": [
+    {
+      "type": "PLUGIN",
+      "schemaVersion": 1,
+      "name": "review-stack",
+      "version": "0.1.0",
+      "extends": [
+        {
+          "type": "PLUGIN_REFERENCE",
+          "name": "review-base",
+          "source": {
+            "type": "MARKETPLACE_SOURCE",
+            "marketplace": "acme-tools",
+            "plugin": "review-base"
+          },
+          "version": "^1.0.0"
+        }
+      ],
+      "skills": [
+        {
+          "type": "SKILL",
+          "source": {
+            "type": "GITHUB_SOURCE",
+            "repo": "acme/shared-skills",
+            "ref": "v1.4.0"
+          },
+          "path": "skills/code-review",
+          "name": "code-review",
+          "expectedResources": [
+            "SKILL.md",
+            "references/checklist.md"
+          ]
+        }
+      ],
+      "agents": [
+        {
+          "type": "AGENT",
+          "source": {
+            "type": "LOCAL_SOURCE",
+            "path": "./"
+          },
+          "path": "agents/reviewer.md",
+          "name": "reviewer"
+        }
+      ],
+      "instructions": [
+        {
+          "type": "INSTRUCTION",
+          "source": {
+            "type": "LOCAL_SOURCE",
+            "path": "./"
+          },
+          "path": "instructions/type-safety.md",
+          "name": "type-safety"
+        }
+      ],
+      "hooks": [
+        {
+          "type": "HOOK",
+          "source": {
+            "type": "LOCAL_SOURCE",
+            "path": "./"
+          },
+          "path": "hooks/evidence-report.json",
+          "name": "evidence-report"
+        }
+      ]
+    }
+  ]
+}
