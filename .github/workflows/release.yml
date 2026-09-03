@@ -267,7 +267,7 @@ jobs:
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           set -euo pipefail
-          (cd dist && sha256sum ./*.tar.gz > SHA256SUMS)
+          (cd dist && sha256sum -- *.tar.gz > SHA256SUMS)
           .github/scripts/verify-release-assets.sh --release-dir dist --tag "$RELEASE_TAG"
           gh release upload "$RELEASE_TAG" dist/* --clobber
           run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
