@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Explore the JSON Schema contracts published with {{PROJECT_NAME}}.">
+  <title>Schema explorer — {{PROJECT_NAME}}</title>
+  <link rel="stylesheet" href="site.css">
+  <script src="schema-explorer.js" defer></script>
+</head>
+<body class="explorer-page">
+  <header class="site-header explorer-header">
+    <a class="wordmark" href="./" aria-label="{{PROJECT_NAME}} home">
+      <span class="wordmark-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span>{{PROJECT_NAME}}</span>
+    </a>
+    <nav class="site-nav" aria-label="Schema navigation">
+      <a href="./#use">Use the Action</a>
+      <a href="./#check">Check a source tree</a>
+      <a class="repository-link" href="{{REPOSITORY_URL}}">GitHub repository <span aria-hidden="true">↗</span></a>
+    </nav>
+  </header>
+
+  <main class="explorer-shell">
+    <aside class="schema-sidebar" aria-label="Schema catalog">
+      <div class="sidebar-heading">
+        <p class="eyebrow">Contract map</p>
+        <h1>Schema explorer</h1>
+        <p>Walk the source contract and each supported projected shape.</p>
+      </div>
+      <label class="schema-search" for="schema-filter">
+        <span>Filter fields</span>
+        <input id="schema-filter" type="search" placeholder="name, type, source…" autocomplete="off">
+      </label>
+      <nav id="schema-catalog" class="schema-catalog" aria-label="Available schemas"></nav>
+    </aside>
+
+    <article class="schema-document" aria-live="polite">
+      <div class="contract-signal" aria-label="Contract lifecycle">
+        <span><i class="signal-source" aria-hidden="true"></i> Source</span>
+        <b aria-hidden="true">→</b>
+        <span><i class="signal-validate" aria-hidden="true"></i> Validate</span>
+        <b aria-hidden="true">→</b>
+        <span><i class="signal-project" aria-hidden="true"></i> Project</span>
+      </div>
+
+      <header id="schema-summary" class="schema-summary">
+        <p class="eyebrow" id="schema-group">Loading contract</p>
+        <h2 id="schema-title">Reading schema…</h2>
+        <p id="schema-description"></p>
+        <div class="schema-meta" id="schema-meta"></div>
+        <a id="raw-schema-link" class="raw-schema-link" href="#">View raw JSON <span aria-hidden="true">↗</span></a>
+      </header>
+
+      <div class="schema-toolbar">
+        <span id="schema-count">Loading fields…</span>
+        <button id="expand-schema" type="button">Expand all</button>
+        <button id="collapse-schema" type="button">Collapse all</button>
+      </div>
+      <div id="schema-content" class="schema-content" aria-busy="true"></div>
+      <p id="schema-empty" class="schema-empty" hidden>No fields match this filter.</p>
+      <noscript>This explorer needs JavaScript to render the checked-in JSON Schema. Use the raw JSON link from the schema catalog instead.</noscript>
+    </article>
+  </main>
+
+  <footer class="site-footer explorer-footer">
+    <a href="./">← Guide</a>
+    <a href="{{REPOSITORY_URL}}">{{ACTION_REPOSITORY}} <span aria-hidden="true">↗</span></a>
+  </footer>
+</body>
+</html>
