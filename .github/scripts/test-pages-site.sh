@@ -18,8 +18,15 @@ require_file .github/workflows/pages.yml 'Pages workflow'
 require_file docs/index.html 'Pages guide'
 require_file docs/schema.html 'schema explorer page'
 require_file docs/schema-explorer.js 'schema explorer behavior'
+require_file docs/schema-reference.js 'schema reference resolver'
+require_file docs/schema-presentation.js 'schema presentation model'
 require_file docs/site.css 'Pages stylesheet'
+require_file .github/scripts/test-schema-reference-inline.mjs 'schema reference behavior check'
+require_file .github/scripts/test-schema-contract-presentation.mjs 'schema presentation behavior check'
 require_file schemas/marketplace/adaptable.schema.json 'published source schema'
+
+node .github/scripts/test-schema-reference-inline.mjs
+node .github/scripts/test-schema-contract-presentation.mjs
 
 proof_root="$(mktemp -d "${TMPDIR:-/tmp}/projektor-pages-proof.XXXXXX")"
 trap 'rm -rf "$proof_root"' EXIT
@@ -30,6 +37,8 @@ GITHUB_REPOSITORY='acme/projeKtor' \
 require_file "$proof_root/site/index.html" 'rendered Pages guide'
 require_file "$proof_root/site/schema.html" 'rendered schema explorer'
 require_file "$proof_root/site/schema-explorer.js" 'rendered schema explorer behavior'
+require_file "$proof_root/site/schema-reference.js" 'rendered schema reference resolver'
+require_file "$proof_root/site/schema-presentation.js" 'rendered schema presentation model'
 require_file "$proof_root/site/site.css" 'rendered Pages stylesheet'
 require_file "$proof_root/site/schema-index.json" 'rendered schema index'
 require_file "$proof_root/site/schemas/marketplace/adaptable.schema.json" 'rendered Pages schema'
@@ -88,7 +97,14 @@ PY
 grep -Fq 'schema-index.json' "$proof_root/site/schema-explorer.js" || \
   die 'schema explorer must load the generated authoritative schema index'
 grep -Fq "\$ref" "$proof_root/site/schema-explorer.js" || \
-  die 'schema explorer must expose schema references for navigation'
+  die 'schema explorer must recognize schema references for inline rendering'
+grep -Fq 'schema-reference.js' "$proof_root/site/schema.html" || \
+  die 'schema explorer must load the inline reference resolver'
+grep -Fq 'schema-presentation.js' "$proof_root/site/schema.html" || \
+  die 'schema explorer must load the typed presentation model'
+if grep -Fq 'Follow $ref' "$proof_root/site/schema-explorer.js"; then
+  die 'schema explorer must inline local references instead of exposing navigation mechanics'
+fi
 grep -Fq 'raw-schema-link' "$proof_root/site/schema.html" || \
   die 'schema explorer must retain a raw JSON escape hatch'
 if grep -Eiq '(^|[^[:alnum:]])ajv([^[:alnum:]]|$)' "$proof_root/site/schema-explorer.js"; then

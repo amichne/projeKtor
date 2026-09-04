@@ -2,10 +2,12 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="description" content="Explore the JSON Schema contracts published with {{PROJECT_NAME}}.">
   <title>Schema explorer — {{PROJECT_NAME}}</title>
   <link rel="stylesheet" href="site.css">
+  <script src="schema-reference.js" defer></script>
+  <script src="schema-presentation.js" defer></script>
   <script src="schema-explorer.js" defer></script>
 </head>
 <body class="explorer-page">
@@ -61,6 +63,20 @@
       <p id="schema-empty" class="schema-empty" hidden>No fields match this filter.</p>
       <noscript>This explorer needs JavaScript to render the checked-in JSON Schema. Use the raw JSON link from the schema catalog instead.</noscript>
     </article>
+
+    <aside class="schema-context" aria-label="Schema page navigation">
+      <div class="schema-context-sticky">
+        <section>
+          <p class="context-label">On this schema</p>
+          <nav id="schema-outline" class="schema-outline" aria-label="Fields on this schema"></nav>
+        </section>
+        <section class="reference-note">
+          <p class="context-label">Reference behavior</p>
+          <p>Local references resolve in place. Recursive edges stop with an explicit cycle marker.</p>
+        </section>
+        <p class="keyboard-hint"><kbd>⌘</kbd><kbd>K</kbd> Focus field filter</p>
+      </div>
+    </aside>
   </main>
 
   <footer class="site-footer explorer-footer">

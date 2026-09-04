@@ -22,6 +22,8 @@ is_required_path() {
       .github/scripts/test-pages-site.sh | \
       .github/scripts/test-release-asset-verifier.sh | \
       .github/scripts/test-release-workflow-contract.sh | \
+      .github/scripts/test-schema-contract-presentation.mjs | \
+      .github/scripts/test-schema-reference-inline.mjs | \
       .github/scripts/test-repository-boundary.sh | \
       .github/scripts/test-schema-contracts.sh | \
       .github/scripts/test-source-projection-action.sh | \

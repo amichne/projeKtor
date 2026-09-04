@@ -1,6 +1,8 @@
 (() => {
   "use strict";
 
+  const presentation = globalThis.ProjektorSchemaPresentation;
+
   const elements = {
     catalog: document.querySelector("#schema-catalog"),
     content: document.querySelector("#schema-content"),
@@ -12,15 +14,20 @@
     filter: document.querySelector("#schema-filter"),
     group: document.querySelector("#schema-group"),
     meta: document.querySelector("#schema-meta"),
+    outline: document.querySelector("#schema-outline"),
     raw: document.querySelector("#raw-schema-link"),
     title: document.querySelector("#schema-title"),
   };
 
   const state = {
+    documents: new Map(),
     manifest: null,
+    pointerIds: new Map(),
+    resolver: null,
     schemaPath: "",
     schema: null,
   };
+  const nodeHydrators = new WeakMap();
 
   function element(tag, className, text) {
     const node = document.createElement(tag);
@@ -76,23 +83,21 @@
     }
   }
 
-  function schemaType(schema) {
-    if (typeof schema === "boolean") return schema ? "any" : "never";
-    if (Array.isArray(schema.type)) return schema.type.join(" | ");
-    if (schema.type) return schema.type;
-    if (schema.$ref) return "reference";
-    if (schema.oneOf) return "oneOf";
-    if (schema.anyOf) return "anyOf";
-    if (schema.allOf) return "allOf";
-    if (schema.enum) return "enum";
-    return "schema";
-  }
-
   function appendBadge(parent, text, className = "type-badge") {
     parent.append(element("span", className, text));
   }
 
-  function appendConstraints(parent, schema) {
+  function appendTypeBadge(parent, descriptor) {
+    appendBadge(parent, descriptor.typeLabel, `type-badge type-${descriptor.typeFamily}`);
+  }
+
+  function appendStatusBadges(parent, descriptor) {
+    for (const status of descriptor.statuses) {
+      appendBadge(parent, status, `status-badge status-${status}`);
+    }
+  }
+
+  function contractConstraints(schema) {
     const constraints = [];
     const scalarKeys = [
       ["format", "format"],
@@ -118,162 +123,253 @@
     if (schema.enum) constraints.push(`enum · ${schema.enum.map(String).join(" | ")}`);
     if (Object.hasOwn(schema, "const")) constraints.push(`constant · ${String(schema.const)}`);
 
+    return constraints;
+  }
+
+  function appendConstraints(parent, schema) {
+    const constraints = contractConstraints(schema);
     if (!constraints.length) return;
     const list = element("div", "constraint-list");
     for (const constraint of constraints) appendBadge(list, constraint, "");
     parent.append(list);
   }
 
-  function appendExample(parent, schema) {
-    const examples = schema.examples || (Object.hasOwn(schema, "example") ? [schema.example] : []);
-    if (!examples.length) return;
-    const figure = element("figure", "node-example");
-    figure.append(element("figcaption", "", examples.length > 1 ? `Example 1 of ${examples.length}` : "Example"));
-    const pre = element("pre");
-    pre.append(element("code", "", JSON.stringify(examples[0], null, 2)));
-    figure.append(pre);
-    parent.append(figure);
-  }
-
-  function normalizeReferencePath(reference) {
-    const [filePart, fragment = ""] = reference.split("#", 2);
-    if (/^[a-z][a-z0-9+.-]*:/i.test(filePart)) {
-      return { external: true, href: reference, label: reference };
-    }
-
-    const stack = state.schemaPath.split("/");
-    stack.pop();
-    if (filePart) {
-      for (const part of filePart.split("/")) {
-        if (!part || part === ".") continue;
-        if (part === "..") {
-          if (!stack.length) return null;
-          stack.pop();
-        } else {
-          stack.push(part);
-        }
-      }
-    } else {
-      stack.splice(0, stack.length, ...state.schemaPath.split("/"));
-    }
-
-    const targetPath = stack.join("/");
-    const targetExists = state.manifest.schemas.some((entry) => entry.path === targetPath);
-    if (!targetExists) return null;
-    const pointer = fragment ? `#${fragment}` : "";
-    return {
-      external: false,
-      href: explorerHref(targetPath, pointer),
-      label: `${targetPath}${pointer}`,
-    };
-  }
-
-  function appendReference(parent, reference) {
-    const resolved = normalizeReferencePath(reference);
-    if (!resolved) {
-      const unresolved = element("span", "ref-link", `Unresolved reference · ${reference}`);
-      unresolved.setAttribute("role", "status");
-      parent.append(unresolved);
+  function appendExample(parent, example) {
+    if (!example) return;
+    if (example.kind === "inline") {
+      const row = element("p", "node-example-inline");
+      row.append(element("span", "", example.label));
+      row.append(element("code", "", JSON.stringify(example.value)));
+      parent.append(row);
       return;
     }
-    const link = element("a", "ref-link", `Follow $ref · ${resolved.label}`);
-    link.href = resolved.href;
-    if (resolved.external) {
-      link.target = "_blank";
-      link.rel = "noreferrer";
-    }
-    parent.append(link);
+    const disclosure = element("details", "node-example node-example-block");
+    disclosure.append(element("summary", "", example.label));
+    const pre = element("pre");
+    const code = element("code", "json-example");
+    appendHighlightedJson(code, example.value);
+    pre.append(code);
+    disclosure.append(pre);
+    parent.append(disclosure);
   }
 
-  function appendChildGroup(parent, title, entries, pointer, depth) {
+  function appendHighlightedJson(parent, value) {
+    const source = JSON.stringify(value, null, 2);
+    const tokens = /("(?:\\.|[^"\\])*")(?=\s*:)|("(?:\\.|[^"\\])*")|-?\d+(?:\.\d+)?(?:e[+-]?\d+)?|\b(?:true|false)\b|\bnull\b/gi;
+    let cursor = 0;
+    for (const match of source.matchAll(tokens)) {
+      parent.append(document.createTextNode(source.slice(cursor, match.index)));
+      const token = match[0];
+      const tokenClass = match[1]
+        ? "json-key"
+        : match[2]
+          ? "json-string"
+          : token === "null"
+            ? "json-null"
+            : token === "true" || token === "false"
+              ? "json-boolean"
+              : "json-number";
+      parent.append(element("span", tokenClass, token));
+      cursor = match.index + token.length;
+    }
+    parent.append(document.createTextNode(source.slice(cursor)));
+  }
+
+  function hasNestedShapes(schema) {
+    return Boolean(
+      Object.keys(schema.properties || {}).length
+      || Object.keys(schema.$defs || {}).length
+      || Object.keys(schema.definitions || {}).length
+      || Object.keys(schema.patternProperties || {}).length
+      || (schema.oneOf || []).length
+      || (schema.anyOf || []).length
+      || (schema.allOf || []).length
+      || (schema.items && !Array.isArray(schema.items))
+      || (typeof schema.additionalProperties === "object" && schema.additionalProperties !== null)
+    );
+  }
+
+  function pointerId(pointer) {
+    if (!state.pointerIds.has(pointer)) {
+      state.pointerIds.set(pointer, `schema-field-${state.pointerIds.size + 1}`);
+    }
+    return state.pointerIds.get(pointer);
+  }
+
+  function appendReferenceFailure(parent, outcome) {
+    const failure = element("p", "reference-failure", outcome.reason || "The referenced shape is unavailable.");
+    failure.setAttribute("role", "status");
+    parent.append(failure);
+  }
+
+  function appendChildGroup(parent, title, entries, pointer, depth, ownerPath, trail) {
     if (!entries.length) return;
     parent.append(element("h3", "child-heading", title));
     const children = element("div", "child-nodes");
     entries.forEach(([name, schema, childPointer, required]) => {
-      children.append(renderSchemaNode(name, schema, childPointer || pointer, required, depth + 1));
+      children.append(renderSchemaNode(
+        name,
+        schema,
+        childPointer || pointer,
+        required,
+        depth + 1,
+        ownerPath,
+        trail,
+      ));
     });
     parent.append(children);
   }
 
-  function renderSchemaNode(name, schema, pointer, required = false, depth = 0) {
-    const details = element("details", "schema-node");
-    details.dataset.pointer = pointer;
-    if (depth < 1) details.open = true;
+  function renderSchemaNode(
+    name,
+    schema,
+    pointer,
+    required = false,
+    depth = 0,
+    ownerPath = state.schemaPath,
+    trail = [],
+  ) {
+    const outcome = state.resolver.inline(schema, ownerPath, trail);
+    const inlined = outcome.kind === "resolved" || outcome.kind === "inline";
+    const visibleSchema = inlined ? outcome.schema : schema;
+    const visiblePath = inlined ? outcome.documentPath : ownerPath;
+    const visibleTrail = inlined ? outcome.trail : trail;
+    const descriptor = presentation.describeContractField(visibleSchema, {
+      required,
+      deprecated: typeof schema === "object" && schema !== null && schema.deprecated === true,
+    });
+    const localExamples = typeof schema === "object" && schema !== null
+      ? schema.examples || (Object.hasOwn(schema, "example") ? [schema.example] : [])
+      : [];
+    const exampleDescriptor = localExamples.length
+      ? presentation.describeContractField(schema).example
+      : descriptor.example;
+    const expandable = !inlined && typeof schema === "object" && schema !== null && schema.$ref
+      ? true
+      : typeof visibleSchema === "object" && visibleSchema !== null
+        && (
+          contractConstraints(visibleSchema).length > 0
+          || exampleDescriptor?.kind === "block"
+          || hasNestedShapes(visibleSchema)
+        );
+    const node = element(expandable ? "details" : "section", `schema-node${expandable ? "" : " schema-node-static"}`);
+    node.dataset.pointer = pointer;
+    node.id = pointerId(pointer);
+    node.dataset.referenceState = outcome.kind;
+    if (expandable && depth < 1) node.open = true;
 
-    const summary = element("summary");
-    summary.append(element("span", "node-name", name));
-    const description = typeof schema === "object" && schema !== null
-      ? schema.description || "No description provided."
-      : schema ? "Any JSON value is accepted." : "No JSON value is accepted.";
+    const summary = element(expandable ? "summary" : "div", expandable ? "" : "node-summary");
+    if (!expandable) summary.tabIndex = -1;
+    const localDescription = typeof schema === "object" && schema !== null ? schema.description : "";
+    const description = typeof visibleSchema === "object" && visibleSchema !== null
+      ? localDescription || visibleSchema.description || (inlined ? "No description provided." : outcome.reason)
+      : visibleSchema ? "Any JSON value is accepted." : "No JSON value is accepted.";
+    const heading = element("span", "node-heading");
+    heading.append(element("span", "node-name", name));
+    appendTypeBadge(heading, descriptor);
+    appendStatusBadges(heading, descriptor);
+    summary.append(heading);
     summary.append(element("span", "node-description", description));
-    summary.append(element("span", "type-badge", schemaType(schema)));
-    details.append(summary);
-
-    const body = element("div", "node-body");
-    if (typeof schema !== "object" || schema === null) {
-      details.append(body);
-      return details;
+    if (exampleDescriptor?.kind === "inline") appendExample(summary, exampleDescriptor);
+    if (expandable) {
+      const toggle = element("span", "node-toggle");
+      toggle.setAttribute("aria-hidden", "true");
+      summary.append(toggle);
     }
+    node.append(summary);
 
-    const badges = element("div", "node-badges");
-    appendBadge(badges, schemaType(schema));
-    if (required) appendBadge(badges, "required", "required-badge");
-    if (schema.deprecated) appendBadge(badges, "deprecated", "required-badge");
-    body.append(badges);
-    appendConstraints(body, schema);
-    if (schema.$ref) appendReference(body, schema.$ref);
-    appendExample(body, schema);
+    if (!expandable) return node;
 
-    const requiredProperties = new Set(schema.required || []);
-    const properties = Object.entries(schema.properties || {}).map(([propertyName, child]) => [
-      propertyName,
-      child,
-      `${pointer}/properties/${escapePointer(propertyName)}`,
-      requiredProperties.has(propertyName),
-    ]);
-    appendChildGroup(body, "Properties", properties, pointer, depth);
+    let hydrated = false;
+    const hydrate = () => {
+      if (hydrated) return;
+      hydrated = true;
+      const body = element("div", "node-body");
+      node.append(body);
+      if (!inlined && typeof schema === "object" && schema !== null && schema.$ref) {
+        appendReferenceFailure(body, outcome);
+        return;
+      }
+      if (typeof visibleSchema !== "object" || visibleSchema === null) return;
 
-    const definitions = Object.entries(schema.$defs || {}).map(([definitionName, child]) => [
-      definitionName,
-      child,
-      `${pointer}/$defs/${escapePointer(definitionName)}`,
-      false,
-    ]);
-    appendChildGroup(body, "Definitions", definitions, pointer, depth);
+      appendConstraints(body, visibleSchema);
+      if (exampleDescriptor?.kind === "block") appendExample(body, exampleDescriptor);
 
-    const patterns = Object.entries(schema.patternProperties || {}).map(([pattern, child]) => [
-      pattern,
-      child,
-      `${pointer}/patternProperties/${escapePointer(pattern)}`,
-      false,
-    ]);
-    appendChildGroup(body, "Pattern properties", patterns, pointer, depth);
-
-    for (const keyword of ["oneOf", "anyOf", "allOf"]) {
-      const variants = (schema[keyword] || []).map((child, index) => [
-        `${keyword} option ${index + 1}`,
+      const requiredProperties = new Set(visibleSchema.required || []);
+      const properties = Object.entries(visibleSchema.properties || {}).map(([propertyName, child]) => [
+        propertyName,
         child,
-        `${pointer}/${keyword}/${index}`,
+        `${pointer}/properties/${escapePointer(propertyName)}`,
+        requiredProperties.has(propertyName),
+      ]);
+      appendChildGroup(body, "Properties", properties, pointer, depth, visiblePath, visibleTrail);
+
+      const definitions = [
+        ...Object.entries(visibleSchema.$defs || {}).map(([definitionName, child]) => [
+          definitionName,
+          child,
+          `${pointer}/$defs/${escapePointer(definitionName)}`,
+          false,
+        ]),
+        ...Object.entries(visibleSchema.definitions || {}).map(([definitionName, child]) => [
+          definitionName,
+          child,
+          `${pointer}/definitions/${escapePointer(definitionName)}`,
+          false,
+        ]),
+      ];
+      appendChildGroup(body, "Definitions", definitions, pointer, depth, visiblePath, visibleTrail);
+
+      const patterns = Object.entries(visibleSchema.patternProperties || {}).map(([pattern, child]) => [
+        pattern,
+        child,
+        `${pointer}/patternProperties/${escapePointer(pattern)}`,
         false,
       ]);
-      appendChildGroup(body, keyword, variants, pointer, depth);
-    }
+      appendChildGroup(body, "Pattern properties", patterns, pointer, depth, visiblePath, visibleTrail);
 
-    if (schema.items && !Array.isArray(schema.items)) {
-      appendChildGroup(body, "Array items", [["item", schema.items, `${pointer}/items`, false]], pointer, depth);
-    }
-    if (typeof schema.additionalProperties === "object" && schema.additionalProperties !== null) {
-      appendChildGroup(
-        body,
-        "Additional property values",
-        [["additional property", schema.additionalProperties, `${pointer}/additionalProperties`, false]],
-        pointer,
-        depth,
-      );
-    }
+      for (const keyword of ["oneOf", "anyOf", "allOf"]) {
+        const variants = (visibleSchema[keyword] || []).map((child, index) => [
+          `${keyword} option ${index + 1}`,
+          child,
+          `${pointer}/${keyword}/${index}`,
+          false,
+        ]);
+        appendChildGroup(body, keyword, variants, pointer, depth, visiblePath, visibleTrail);
+      }
 
-    details.append(body);
-    return details;
+      if (visibleSchema.items && !Array.isArray(visibleSchema.items)) {
+        appendChildGroup(
+          body,
+          "Array items",
+          [["item", visibleSchema.items, `${pointer}/items`, false]],
+          pointer,
+          depth,
+          visiblePath,
+          visibleTrail,
+        );
+      }
+      if (typeof visibleSchema.additionalProperties === "object" && visibleSchema.additionalProperties !== null) {
+        appendChildGroup(
+          body,
+          "Additional property values",
+          [["additional property", visibleSchema.additionalProperties, `${pointer}/additionalProperties`, false]],
+          pointer,
+          depth,
+          visiblePath,
+          visibleTrail,
+        );
+      }
+    };
+    nodeHydrators.set(node, hydrate);
+    if (outcome.kind === "resolved" && !node.open) {
+      node.addEventListener("toggle", () => {
+        if (node.open) hydrate();
+      }, { once: true });
+    } else {
+      hydrate();
+    }
+    return node;
   }
 
   function escapePointer(value) {
@@ -288,9 +384,38 @@
     elements.meta.replaceChildren();
 
     const draft = (schema.$schema || "draft unspecified").replace("https://json-schema.org/", "").replace("/schema", "");
-    const values = [draft, schema.$id || "id unspecified", schemaType(schema)];
+    const values = [draft, schema.$id || "id unspecified", presentation.schemaType(schema)];
     if (schema.additionalProperties === false) values.push("closed root");
     for (const value of values) appendBadge(elements.meta, value, "");
+  }
+
+  function renderOutline(schema) {
+    elements.outline.replaceChildren();
+    const outcome = state.resolver.inline(schema, state.schemaPath);
+    if (outcome.kind !== "inline" && outcome.kind !== "resolved") {
+      elements.outline.append(element("span", "outline-empty", "Outline unavailable"));
+      return;
+    }
+
+    const visibleSchema = outcome.schema;
+    if (typeof visibleSchema !== "object" || visibleSchema === null) {
+      elements.outline.append(element("span", "outline-empty", "No named fields"));
+      return;
+    }
+    const entries = Object.keys(visibleSchema.properties || {});
+    const source = entries.length ? "properties" : (visibleSchema.$defs ? "$defs" : "definitions");
+    const names = entries.length ? entries : Object.keys(visibleSchema[source] || {});
+    if (!names.length) {
+      elements.outline.append(element("span", "outline-empty", "No named fields"));
+      return;
+    }
+
+    for (const name of names) {
+      const pointer = `#/${source}/${escapePointer(name)}`;
+      const link = element("a", "", displayTitle(name));
+      link.href = `#${pointerId(pointer)}`;
+      elements.outline.append(link);
+    }
   }
 
   function applyFilter() {
@@ -320,7 +445,7 @@
       parent = parent.parentElement;
     }
     target.scrollIntoView({ block: "center" });
-    target.querySelector("summary")?.focus({ preventScroll: true });
+    target.querySelector("summary, .node-summary")?.focus({ preventScroll: true });
   }
 
   function showError(message) {
@@ -341,6 +466,12 @@
         throw new Error("Schema index contains no contracts");
       }
       state.manifest = manifest;
+      if (!window.SchemaReference || typeof window.SchemaReference.createResolver !== "function") {
+        throw new Error("Schema reference resolver is unavailable");
+      }
+      if (!presentation || typeof presentation.describeContractField !== "function") {
+        throw new Error("Schema presentation model is unavailable");
+      }
 
       const parameters = new URLSearchParams(window.location.search);
       const requestedPath = parameters.get("schema");
@@ -352,10 +483,17 @@
 
       state.schemaPath = entry.path;
       buildCatalog(manifest.schemas, entry.path);
-      const schema = await fetchJson(entry.path, entry.title);
+      const documents = await Promise.all(manifest.schemas.map(async (schemaEntry) => [
+        schemaEntry.path,
+        await fetchJson(schemaEntry.path, schemaEntry.title),
+      ]));
+      state.documents = new Map(documents);
+      state.resolver = window.SchemaReference.createResolver(state.documents);
+      const schema = state.documents.get(entry.path);
       state.schema = schema;
       renderSummary(entry, schema);
       elements.content.replaceChildren(renderSchemaNode("Root contract", schema, "#", true));
+      renderOutline(schema);
       elements.content.setAttribute("aria-busy", "false");
       applyFilter();
       revealPointer(parameters.get("pointer"));
@@ -366,10 +504,27 @@
 
   elements.filter.addEventListener("input", applyFilter);
   elements.expand.addEventListener("click", () => {
-    for (const node of elements.content.querySelectorAll(".schema-node:not([hidden])")) node.open = true;
+    let previousCount = -1;
+    for (let pass = 0; pass < 32; pass += 1) {
+      const nodes = [...elements.content.querySelectorAll(".schema-node:not([hidden])")];
+      if (nodes.length === previousCount) break;
+      previousCount = nodes.length;
+      for (const node of nodes) {
+        node.open = true;
+        nodeHydrators.get(node)?.();
+      }
+    }
+    applyFilter();
   });
   elements.collapse.addEventListener("click", () => {
     for (const node of elements.content.querySelectorAll(".schema-node")) node.open = false;
+  });
+  document.addEventListener("keydown", (event) => {
+    if ((event.metaKey || event.ctrlKey) && event.key.toLocaleLowerCase() === "k") {
+      event.preventDefault();
+      elements.filter.focus();
+      elements.filter.select();
+    }
   });
 
   start();
