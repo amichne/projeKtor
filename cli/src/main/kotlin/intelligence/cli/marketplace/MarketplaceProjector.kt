@@ -210,10 +210,26 @@ internal class MarketplaceProjector(
         while (queue.isNotEmpty()) {
             val primitive = queue.removeFirst()
             primitive.arrayValue("dependsOn").forEachObject(::enqueue)
+            enqueueAuthoredDependencies(repoRoot, primitive, ::enqueue)
             copyPrimitive(repoRoot, pluginOut, primitive, hydrated)
         }
 
         return hydrated.build()
+    }
+
+    private fun enqueueAuthoredDependencies(
+        repoRoot: Path,
+        primitive: JsonObject,
+        enqueue: (JsonObject) -> Unit,
+    ) {
+        if (PrimitiveKind.fromSourceName(primitive.stringValue("type")) != PrimitiveKind.Hook) {
+            return
+        }
+        val sourcePath = resolveSourcePath(repoRoot, primitive.requiredString("path"))
+        if (!sourcePath.name.endsWith(".hook.json")) {
+            return
+        }
+        JsonFiles.readObject(sourcePath).arrayValue("dependsOn").forEachObject(enqueue)
     }
 
     private fun copyPrimitive(

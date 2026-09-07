@@ -10,6 +10,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.io.path.createDirectories
 import kotlin.io.path.exists
+import kotlin.io.path.readText
 import kotlin.io.path.writeText
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -253,7 +254,7 @@ class ProjectionPipelineTest {
     }
 
     @Test
-    fun `github hook metadata rewrites primitive dependencies to hydrated package paths`() {
+    fun `hook metadata dependencies are hydrated and rewritten for every projection`() {
         val repository = minimalMarketplaceRepository()
         writeJson(
             repository.resolve("source")
@@ -267,17 +268,7 @@ class ProjectionPipelineTest {
               "name": "core-plugin",
               "version": "0.1.0",
               "description": "Core plugin.",
-              "instructions": [
-                {
-                  "type": "INSTRUCTION",
-                  "source": {
-                    "type": "LOCAL_SOURCE",
-                    "path": "./"
-                  },
-                  "path": "concepts/type-safety/core.md",
-                  "name": "type-safety"
-                }
-              ],
+              "instructions": [],
               "hooks": [
                 {
                   "type": "HOOK",
@@ -410,26 +401,45 @@ class ProjectionPipelineTest {
                 it.parent.createDirectories()
                 it.writeText("#!/usr/bin/env bash\n", Charsets.UTF_8)
             }
-        val output = Files.createTempDirectory("source-projection-github-hook-metadata-")
+        fun assertHydrated(pluginRoot: Path) {
+            val hookMetadata = JsonFiles.readObject(
+                pluginRoot.resolve("hooks")
+                    .resolve("metadata")
+                    .resolve("layout-check.hook.json")
+            )
+            val dependency = hookMetadata.arrayValue("dependsOn").single().jsonObject
+            val instruction = pluginRoot.resolve("instructions").resolve("type-safety.md")
+
+            assertEquals("hooks/layout-check.hooks.json", hookMetadata.stringValue("path"))
+            assertEquals("instructions/type-safety.md", dependency.stringValue("path"))
+            assertTrue(instruction.exists())
+            assertEquals("# Type Safety", instruction.readText(Charsets.UTF_8).trim())
+        }
+
+        val githubOutput = Files.createTempDirectory("source-projection-github-hook-metadata-")
 
         MarketplaceProjector(output = {}).materialize(
             repoRoot = repository,
-            outRoot = output,
+            outRoot = githubOutput,
             provider = MarketplaceProvider.GitHub,
         )
-
-        val hookMetadata = JsonFiles.readObject(
-            output.resolve(".github")
+        assertHydrated(
+            githubOutput.resolve(".github")
                 .resolve("plugin")
                 .resolve("core-plugin")
-                .resolve("hooks")
-                .resolve("metadata")
-                .resolve("layout-check.hook.json")
         )
-        val dependency = hookMetadata.arrayValue("dependsOn").single().jsonObject
 
-        assertEquals("hooks/layout-check.hooks.json", hookMetadata.stringValue("path"))
-        assertEquals("instructions/type-safety.md", dependency.stringValue("path"))
+        val codexOutput = Files.createTempDirectory("source-projection-codex-hook-metadata-")
+        MarketplaceProjector(output = {}).materialize(
+            repoRoot = repository,
+            outRoot = codexOutput,
+            provider = MarketplaceProvider.Codex,
+        )
+        assertHydrated(
+            codexOutput.resolve(".agents")
+                .resolve("plugins")
+                .resolve("core-plugin")
+        )
     }
 
     @Test
