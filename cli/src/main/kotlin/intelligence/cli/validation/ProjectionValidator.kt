@@ -310,6 +310,16 @@ internal class ProjectionValidator(
             issues += "${path.relativeToUnix(repo)}: plugin name `$name` does not match marketplace entry `$expectedName`"
         }
         validatePluginInterface(repo, path, manifest, issues)
+        if (manifest.containsKey("codexMcpServers")) {
+            val mcpPath = path.parent.resolve(".mcp.json")
+            if (manifest.stringValue("codexMcpServers") != "./.mcp.json" ||
+                !mcpPath.isRegularFile() || Files.isSymbolicLink(mcpPath)
+            ) {
+                issues += "${path.relativeToUnix(repo)}: codexMcpServers requires a regular adjacent .mcp.json"
+            } else {
+                validateCodexMcpFile(repo, mcpPath, issues)
+            }
+        }
 
         PrimitiveKind.entries.forEach { kind ->
             manifest.arrayValue(kind.collectionName).forEachObject { primitive ->
@@ -732,6 +742,26 @@ internal class ProjectionValidator(
             issues += "${manifestPath.relativeToUnix(root)}: $providerName plugin name `$name` does not match marketplace entry `$expectedName`"
         }
         requireString(manifest, "version", manifestPath, root, issues)
+        if (providerName == "Codex" && manifest.containsKey("mcpServers")) {
+            val mcpPath = manifestPath.parent.parent.resolve(".mcp.json")
+            if (manifest.stringValue("mcpServers") != "./.mcp.json" ||
+                !mcpPath.isRegularFile() || Files.isSymbolicLink(mcpPath)
+            ) {
+                issues += "${manifestPath.relativeToUnix(root)}: mcpServers requires a regular plugin-root .mcp.json"
+            } else {
+                validateCodexMcpFile(root, mcpPath, issues)
+            }
+        }
+    }
+
+    private fun validateCodexMcpFile(root: Path, path: Path, issues: MutableList<String>) {
+        val document = readObject(path, root, issues) ?: return
+        val servers = document.objectValue("mcpServers")
+        if (servers.isNullOrEmpty() || servers.any { (name, value) ->
+                name.isBlank() || value !is JsonObject || value.stringValue("command").isNullOrBlank()
+            }) {
+            issues += "${path.relativeToUnix(root)}: mcpServers must contain named command servers"
+        }
     }
 
     private fun validateSchema(

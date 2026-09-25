@@ -104,11 +104,12 @@ internal class MarketplaceProjector(
             pluginOut.createDirectories()
 
             val hydrated = hydratePlugin(pluginProjection.repoRoot, pluginOut, pluginProjection.manifest)
+            val mcpReference = copyCodexMcpServers(pluginProjection, pluginOut)
             renderAgentsMdAdapter(pluginOut, pluginProjection.name, pluginProjection.description, hydrated)
             codexPlugins.add(codexMarketplaceEntry(pluginProjection.name, pluginProjection.category))
             val codexManifest = codexPluginManifest(pluginProjection, ownerName, hydrated)
             JsonFiles.writeObject(pluginOut.resolve(CODEX_PLUGIN_DIR).resolve("plugin.json"), codexManifest)
-            lockPlugins.add(lockEntry(pluginProjection, codexManifest, hydrated))
+            lockPlugins.add(lockEntry(pluginProjection, codexManifest, hydrated, mcpReference))
         }
 
         JsonFiles.writeObject(
@@ -215,6 +216,33 @@ internal class MarketplaceProjector(
         }
 
         return hydrated.build()
+    }
+
+    private fun copyCodexMcpServers(plugin: PluginProjection, pluginOut: Path): HydratedReference? {
+        if ("codexMcpServers" !in plugin.manifest) return null
+        val pointer = plugin.manifest.stringValue("codexMcpServers")
+        if (pointer != "./.mcp.json") {
+            throw MarketplaceFailure.InvalidSource("${plugin.name}: unsupported Codex MCP path `$pointer`")
+        }
+        val source = resolveSourcePath(plugin.repoRoot, plugin.sourcePath.toString()).resolve(".mcp.json")
+        if (!Files.isRegularFile(source) || Files.isSymbolicLink(source)) {
+            throw MarketplaceFailure.InvalidSource("${plugin.name}: missing regular Codex .mcp.json")
+        }
+        val servers = JsonFiles.readObject(source).objectValue("mcpServers")
+        if (servers.isNullOrEmpty() || servers.any { (name, value) ->
+                name.isBlank() || value !is JsonObject || value.stringValue("command").isNullOrBlank()
+            }) {
+            throw MarketplaceFailure.InvalidSource("${plugin.name}: Codex .mcp.json needs named command servers")
+        }
+        val target = pluginOut.resolve(".mcp.json")
+        FileSystem.copyPath(source, target)
+        return HydratedReference(
+            type = "MCP_CONFIGURATION",
+            name = null,
+            sourcePath = sourceDisplayPath(plugin.sourcePath.resolve(".mcp.json")),
+            targetPath = ".mcp.json",
+            sha256 = Digests.digestPath(target, DigestAlgorithm.Sha256),
+        )
     }
 
     private fun enqueueAuthoredDependencies(
@@ -674,6 +702,9 @@ internal class MarketplaceProjector(
     ): JsonObject {
         plugin.adaptableManifest?.adapters?.codex?.let { adapter ->
             requirePluginAdapterIdentity(plugin, adapter.name, adapter.version, "Codex")
+            if (adapter.mcpServers != plugin.manifest.stringValue("codexMcpServers")) {
+                throw MarketplaceFailure.InvalidSource("${plugin.name}: Codex adapter MCP path differs from authored plugin")
+            }
             return HarnessDocumentCodec.encode(adapter)
         }
         return HarnessDocumentCodec.encode(
@@ -689,6 +720,7 @@ internal class MarketplaceProjector(
                     .takeIf { hooks -> hooks.isNotEmpty() }
                     ?.sorted()
                     ?.map { path -> "./$path" },
+                mcpServers = plugin.manifest.stringValue("codexMcpServers"),
                 presentation = CodexPluginInterface(
                     displayName = titleCase(plugin.name),
                     shortDescription = shortDescription(plugin.description),
@@ -813,12 +845,19 @@ internal class MarketplaceProjector(
         )
     }
 
-    private fun lockEntry(plugin: PluginProjection, codexManifest: JsonObject, hydrated: HydratedPlugin): JsonObject =
+    private fun lockEntry(
+        plugin: PluginProjection,
+        codexManifest: JsonObject,
+        hydrated: HydratedPlugin,
+        mcpReference: HydratedReference?,
+    ): JsonObject =
         buildJsonObject {
             put("name", plugin.name)
             put("version", codexManifest.requiredString("version"))
             put("sourceManifest", sourceDisplayPath(plugin.sourcePath.resolve("plugin.json")))
-            put("references", hydrated.toReferenceJson())
+            val references = (hydrated.references + listOfNotNull(mcpReference))
+                .sortedWith(compareBy(HydratedReference::type, HydratedReference::sourcePath, HydratedReference::targetPath))
+            put("references", JsonArray(references.map(HydratedReference::toJson)))
         }
 
     private fun personFor(owner: JsonObject, fallbackName: String): HarnessPerson =

@@ -20,6 +20,70 @@ import kotlinx.serialization.json.jsonObject
 
 class ProjectionPipelineTest {
     @Test
+    fun `Codex MCP sidecar is copied and referenced while GitHub projection stays unchanged`() {
+        val repository = minimalMarketplaceRepository()
+        writeJson(
+            repository.resolve("source/adaptable.marketplace.json"),
+            """
+            {
+              "type": "MARKETPLACE",
+              "schemaVersion": 1,
+              "name": "fixture-marketplace",
+              "owner": { "name": "Fixture Owner" },
+              "plugins": [{
+                "type": "PLUGIN_ENTRY",
+                "name": "core-plugin",
+                "plugin": {
+                  "type": "PLUGIN_REFERENCE",
+                  "name": "core-plugin",
+                  "source": { "type": "LOCAL_SOURCE", "path": "./plugins/core-plugin" },
+                  "version": "0.1.0"
+                }
+              }]
+            }
+            """,
+        )
+        val plugin = repository.resolve("source/plugins/core-plugin")
+        writeJson(
+            plugin.resolve("plugin.json"),
+            """
+            {
+              "type": "PLUGIN",
+              "schemaVersion": 1,
+              "name": "core-plugin",
+              "version": "0.1.0",
+              "skills": [],
+              "agents": [],
+              "instructions": [],
+              "hooks": [],
+              "codexMcpServers": "./.mcp.json"
+            }
+            """,
+        )
+        writeJson(plugin.resolve(".mcp.json"), """{"mcpServers":{"kast":{"command":"/bin/bash","args":["-c","exec kast"]}}}""")
+        val codexOutput = Files.createTempDirectory("source-projection-mcp-codex-")
+        val githubOutput = Files.createTempDirectory("source-projection-mcp-github-")
+
+        MarketplaceProjector(output = {}).materialize(repository, codexOutput, MarketplaceProvider.Codex)
+        MarketplaceProjector(output = {}).materialize(repository, githubOutput, MarketplaceProvider.GitHub)
+
+        val codexPlugin = codexOutput.resolve(".agents/plugins/core-plugin")
+        assertEquals(
+            "./.mcp.json",
+            JsonFiles.readObject(codexPlugin.resolve(".codex-plugin/plugin.json")).stringValue("mcpServers"),
+        )
+        assertEquals(plugin.resolve(".mcp.json").readText(), codexPlugin.resolve(".mcp.json").readText())
+        assertTrue(!githubOutput.resolve(".github/plugin/core-plugin/.mcp.json").exists())
+        assertEquals(0, ProjectionValidator(output = {}).validate(ProjectionValidationOptions(repository, codexOutput)))
+        assertEquals(0, ProjectionValidator(output = {}).validate(ProjectionValidationOptions(repository, githubOutput)))
+
+        Files.delete(plugin.resolve(".mcp.json"))
+        assertFailsWith<MarketplaceFailure.InvalidSource> {
+            MarketplaceProjector(output = {}).materialize(repository, codexOutput, MarketplaceProvider.Codex)
+        }
+    }
+
+    @Test
     fun `retained native adapters are exposed by their matching projection`() {
         val repository = minimalMarketplaceRepository()
         writeJson(

@@ -170,6 +170,11 @@
         ]
       ]
     },
+    "codexMcpServers": {
+      "type": "string",
+      "description": "Codex MCP configuration packaged beside this authored plugin manifest.",
+      "enum": ["./.mcp.json"]
+    },
     "adapters": {
       "description": "Validated harness-native plugin manifests retained as lossless adapter authorities.",
       "examples": [

@@ -367,6 +367,7 @@ internal data class AdaptablePluginDocument(
     @EncodeDefault val agents: List<JsonObject> = emptyList(),
     @EncodeDefault val instructions: List<JsonObject> = emptyList(),
     @EncodeDefault val hooks: List<JsonObject> = emptyList(),
+    val codexMcpServers: String? = null,
     val adapters: AdaptablePluginAdapters? = null,
     val metadata: Map<String, String> = emptyMap(),
 ) : AdaptableDocumentModel
